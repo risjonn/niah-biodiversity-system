@@ -139,5 +139,32 @@ dist
 
 # Vite files
 vite.config.js.timestamp-*
+
+# Expo (mobile-app)
+.expo/
+web-build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# PlatformIO / Arduino (iot-firmware)
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / editor
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+
+# Supabase local dev
+.supabase/
 vite.config.ts.timestamp-*
 .vite/
