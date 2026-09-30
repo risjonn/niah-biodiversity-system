@@ -88,6 +88,16 @@ or spacing values in components, import from `theme/theme.js` instead.
 
 before starting your next piece of work
 
+## Task tracking
+
+All tasks are tracked as GitHub Issues, organized on the 
+[Project board](https://github.com/users/risjonn/projects/2)
+by sprint (Sprint 1 = full build, Sprint 2 = testing only).
+
+- Check the **Issues** tab for your assigned tasks
+- Move your issue's card on the board as you work (Todo → In Progress → Done)
+- Reference the issue number in your commits/PRs (e.g. "Closes #7") so GitHub links them automatically
+
 ## Tech stack
 
 - **Mobile**: React Native + Expo (JavaScript)
