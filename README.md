@@ -28,6 +28,7 @@ built for Sarawak Forestry Corporation (SFC) and NeuonAI. COS30049 group project
   and file-lock errors.
 - **PowerShell script execution may be blocked by default.** If `npm -v` gives a
   "running scripts is disabled" error, run this once:
+
 ```powershell
   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ```
@@ -35,12 +36,14 @@ built for Sarawak Forestry Corporation (SFC) and NeuonAI. COS30049 group project
 ## Getting started
 
 1. Clone the repo:
+
 ```bash
    git clone https://github.com/risjonn/niah-biodiversity-system.git
    cd niah-biodiversity-system
 ```
 
 2. Pick the app you're working on and install its dependencies:
+
 ```bash
    cd web-app        # or mobile-app
    npm install
@@ -48,10 +51,11 @@ built for Sarawak Forestry Corporation (SFC) and NeuonAI. COS30049 group project
 
 3. Set up environment variables. Copy the example file and fill in the real values
    (ask Haris for the Supabase URL and publishable key):
+
 ```bash
    cp .env.example .env
 ```
-   
+
 4. Run the app:
    - **Web app**: `npm run dev`, then open the local URL shown in the terminal
    - **Mobile app**: `npx expo start`, then scan the QR code with Expo Go
@@ -64,17 +68,25 @@ built for Sarawak Forestry Corporation (SFC) and NeuonAI. COS30049 group project
 - **Mobile app**: `npx expo install <package-name>` (not plain `npm install`, this ensures
   the version installed is compatible with our Expo SDK version)
 
+## Design system
+
+Shared colours, typography, and spacing tokens for both apps are documented in
+[`docs/design-system.md`](docs/design-system.md). Don't hardcode colours, fonts,
+or spacing values in components, import from `theme/theme.js` instead.
+
 ## Branching workflow
 
 - `main` is protected, all changes go through a pull request, direct pushes are blocked
 - Branch naming: `feature/task-name` for new features, `fix/task-name` for bug fixes,
   `docs/task-name` for documentation
 - After your Pull Requests is merged, delete the branch, then run:
+
 ```bash
   git checkout main
   git pull
 ```
-  before starting your next piece of work
+
+before starting your next piece of work
 
 ## Tech stack
 
