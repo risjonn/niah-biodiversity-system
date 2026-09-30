@@ -49,3 +49,54 @@ Fixed scale, in px: `4, 8, 12, 16, 24, 32, 48`
 - Web: `web-app/src/theme/theme.js`
 - Mobile: `mobile-app/src/theme/theme.js`
 - Mobile shared components (Button, etc.): `mobile-app/src/components/`
+
+## Usage
+
+### Web (MUI)
+
+Import tokens directly if you need raw values, or use MUI's `sx` prop with theme-aware shortcuts:
+
+```jsx
+import { Box, Typography, Button } from '@mui/material'
+
+function Example() {
+  return (
+    <Box sx={{ p: 2, bgcolor: 'background.paper' }}>
+      <Typography variant="h2">Heading</Typography>
+      <Button variant="contained">Action</Button>
+    </Box>
+  )
+}
+```
+
+MUI components automatically pick up colours, fonts, and border radius from the
+theme, no need to import `tokens` directly unless you're styling something
+outside MUI's components (a plain `<div>`, for example).
+
+### Mobile (React Native)
+
+Import the `theme` object and the shared `Button` component:
+
+```js
+import { View, Text, StyleSheet } from 'react-native'
+import { theme } from '../theme/theme'
+import Button from '../components/Button'
+
+export default function Example() {
+  return (
+    <View style={styles.container}>
+      <Text style={styles.heading}>Heading</Text>
+      <Button title="Action" onPress={() => {}} />
+    </View>
+  )
+}
+
+const styles = StyleSheet.create({
+  container: { padding: theme.spacing.lg },
+  heading: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: theme.typography.heading2.fontSize,
+    color: theme.colors.textPrimary,
+  },
+})
+```
