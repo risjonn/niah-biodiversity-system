@@ -139,6 +139,8 @@ dist
 
 # Vite files
 vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+.vite/
 
 # Expo (mobile-app)
 .expo/
@@ -166,5 +168,3 @@ Thumbs.db
 
 # Supabase local dev
 .supabase/
-vite.config.ts.timestamp-*
-.vite/
