@@ -74,6 +74,22 @@ Shared colours, typography, and spacing tokens for both apps are documented in
 [`docs/design-system.md`](docs/design-system.md). Don't hardcode colours, fonts,
 or spacing values in components, import from `theme/theme.js` instead.
 
+## Shared patterns already built
+
+Before building a new screen, check these existing pieces first, don't duplicate them:
+
+- **Auth & protected routes**: `mobile-app/src/context/AuthContext.js` +
+  `RootNavigator.js` (mobile), `web-app/src/context/AuthContext.jsx` +
+  `ProtectedRoute.jsx` (web). Role-based routing pattern is already working,
+  follow it rather than reinventing.
+- **Layouts (web)**: `AppLayout` (nav bar, logged-in pages) and `AuthLayout`
+  (login page) in `web-app/src/layouts/`
+- **Shared components (mobile)**: `TextInput` and `HeaderIconButton` in
+  `mobile-app/src/components/`, use these instead of raw React Native inputs
+  or text-based header buttons
+- **Web components**: use MUI directly (`TextField`, `Button`, `AppBar`),
+  no custom wrapper needed, they already pull from the theme
+
 ## Branching workflow
 
 - `main` is protected, all changes go through a pull request, direct pushes are blocked
@@ -90,7 +106,7 @@ before starting your next piece of work
 
 ## Task tracking
 
-All tasks are tracked as GitHub Issues, organized on the 
+All tasks are tracked as GitHub Issues, organized on the
 [Project board](https://github.com/users/risjonn/projects/2)
 by sprint (Sprint 1 = full build, Sprint 2 = testing only).
 
