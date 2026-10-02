@@ -49,14 +49,21 @@ built for Sarawak Forestry Corporation (SFC) and NeuonAI. COS30049 group project
    npm install
 ```
 
-3. Set up environment variables. Copy the example file and fill in the real values
-   (ask Haris for the Supabase URL and publishable key):
+3. Set up environment variables. Each app has its own `.env.example` file
+   (`web-app/.env.example` and `mobile-app/.env.example`), with different
+   variable names for each platform. From inside whichever app folder you're
+   working in (from step 2), run the command below to create your own `.env` file, then
+   open it and fill in the real values (ask Haris for the Supabase URL and
+   publishable key):
 
 ```bash
    cp .env.example .env
 ```
 
-4. Run the app:
+4. Run the app. **Make sure you're inside the right folder first** (`web-app` or
+   `mobile-app`, not the repo root), you can check where you are with `pwd`. If
+   you're not in the right place, use `cd web-app` or `cd mobile-app` (add `cd ..`
+   first if you need to go up a level before going into the other folder).
    - **Web app**: `npm run dev`, then open the local URL shown in the terminal
    - **Mobile app**: `npx expo start`, then scan the QR code with Expo Go
      (make sure you're logged into the same Expo account on both your computer and your phone,
@@ -112,11 +119,14 @@ by sprint (Sprint 1 = full build, Sprint 2 = testing only).
 
 - Check the **Issues** tab for your assigned tasks
 - Move your issue's card on the board as you work (Todo → In Progress → Done)
-- Reference the issue number in your commits/PRs (e.g. "Closes #7") so GitHub links them automatically
+- When you're doing Pull Request, type `Closes` followed by the issue's title in
+  your Pull Request description (GitHub will autocomplete it), don't type the issue
+  number directly, since it may not match what you'd expect
 
 ## Tech stack
 
 - **Mobile**: React Native + Expo (JavaScript)
 - **Web**: React + Vite + Material UI (JavaScript)
 - **Backend**: Supabase (Postgres database, authentication, storage, real-time, Edge Functions)
-- **IoT**: ESP32 microcontrollers with environmental sensors (IoT team can double check again later)
+- **IoT**: ESP32 microcontrollers with environmental sensors (exact sensor
+  models/components TBD, IoT team to confirm and update this section)
