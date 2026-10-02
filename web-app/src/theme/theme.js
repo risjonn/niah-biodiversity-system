@@ -1,4 +1,4 @@
-import { createTheme } from '@mui/material/styles'
+import { alpha, createTheme } from '@mui/material/styles'
 
 export const tokens = {
   primary: '#3F5F68',
@@ -43,6 +43,21 @@ export const theme = createTheme({
           minHeight: 44,
           textTransform: 'none',
           fontWeight: 500,
+          variants: [
+            {
+              // Outlined buttons on the primary header use color="inherit" to pick up its white
+              // text, and MUI keeps their border as currentColor (white). The default hover tint
+              // is based on the dark text colour, so darken with primaryDark instead.
+              props: { variant: 'outlined', color: 'inherit' },
+              style: {
+                '@media (hover: hover)': {
+                  '&:hover': {
+                    backgroundColor: alpha(tokens.primaryDark, 0.5),
+                  },
+                },
+              },
+            },
+          ],
         },
       },
     },
