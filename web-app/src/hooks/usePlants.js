@@ -10,6 +10,10 @@ const SEARCH_COLUMNS = ['qr_code', 'location_description', 'morphological_notes'
 
 const REVIEW_STATUSES = ['approved', 'rejected']
 
+const PHOTO_BUCKET = 'plant-photos'
+// Long enough to cover a review session, short enough that a copied link soon stops working
+const PHOTO_URL_LIFETIME_SECONDS = 3600
+
 // Plant records for review and for species pages. Every function resolves to { data, error } and
 // never throws: `error` is a message ready to show on screen (the same pattern as
 // mobile-app/src/hooks/usePlants.js and signIn in AuthContext).
@@ -66,8 +70,22 @@ export function usePlants() {
     fetchApprovedPlants,
     countPendingPlants,
     countApprovedPlants,
+    getPlantPhotoUrl,
     reviewPlant,
   }
+}
+
+// Plant photos are in a private bucket (database/schema/006_plant_photos_storage.sql) and
+// photo_url holds the file's storage path, so showing one needs a short-lived signed URL.
+// Resolves to { data: signedUrl, error }; storage only signs it for the photo's owner and for
+// conservation officers and admins.
+async function getPlantPhotoUrl(path) {
+  const { data, error } = await supabase.storage
+    .from(PHOTO_BUCKET)
+    .createSignedUrl(path, PHOTO_URL_LIFETIME_SECONDS)
+
+  if (error) return { data: null, error: photoErrorMessage(error) }
+  return { data: data.signedUrl, error: null }
 }
 
 // How many records are waiting for review. Row-level security only counts pending records for
@@ -118,6 +136,18 @@ async function fetchApprovedPlants({ search, speciesId } = {}) {
   const { data, error } = await query
   if (error) return { data: [], error: plantErrorMessage(error) }
   return { data, error: null }
+}
+
+function photoErrorMessage(error) {
+  // Request never reached the server (offline, server unreachable)
+  if (error.name === 'StorageUnknownError') {
+    return 'Unable to reach the server. Check your connection and try again.'
+  }
+  // Storage answers "not found" both for a missing file and for one the user may not read
+  if (Number(error.statusCode ?? error.status) === 404 || /not found/i.test(error.message)) {
+    return 'This photo could not be found. It may not have finished uploading.'
+  }
+  return 'This photo could not be loaded. Try again later.'
 }
 
 function plantErrorMessage(error) {

@@ -3,26 +3,36 @@ import { Keyboard, KeyboardAvoidingView, ScrollView, StyleSheet, Text, View } fr
 import { useHeaderHeight } from '@react-navigation/elements'
 import QRCode from 'react-native-qrcode-svg'
 import Button from '../components/Button'
+import PhotoField from '../components/PhotoField'
 import ScientificName from '../components/ScientificName'
 import SpeciesPicker from '../components/SpeciesPicker'
 import TextInput from '../components/TextInput'
 import { useCurrentLocation } from '../hooks/useCurrentLocation'
+import { usePlantPhoto } from '../hooks/usePlantPhoto'
 import { usePlants } from '../hooks/usePlants'
 import { theme } from '../theme/theme'
 
 // Side length of the QR image shown after saving, big enough to scan from another phone
 const QR_CODE_SIZE = 200
 
-const EMPTY_FORM = { species: null, height: '', notes: '', locationDescription: '' }
+const SUBMIT_TITLES = { uploading: 'Uploading photo…', saving: 'Submitting…' }
+
+const EMPTY_FORM = { species: null, height: '', notes: '', locationDescription: '', photo: null }
 
 export default function FieldRegistrationScreen() {
   const { submitPlant } = usePlants()
+  const { uploadPlantPhoto } = usePlantPhoto()
   const location = useCurrentLocation()
   const headerHeight = useHeaderHeight()
   const scrollRef = useRef(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [fieldErrors, setFieldErrors] = useState({})
-  const [submitting, setSubmitting] = useState(false)
+  // 'uploading' while the photo uploads, then 'saving' while the record is saved; null when idle
+  const [phase, setPhase] = useState(null)
+  const busy = phase !== null
+  // The photo already uploaded for this form, so retrying after a failed save reuses it instead of
+  // uploading a second copy
+  const uploadedPhoto = useRef(null)
   const [submitError, setSubmitError] = useState(null)
   // The record returned by submitPlant once saved, which swaps the form for its QR code
   const [savedPlant, setSavedPlant] = useState(null)
@@ -30,7 +40,7 @@ export default function FieldRegistrationScreen() {
   const setField = (name) => (value) => setForm((current) => ({ ...current, [name]: value }))
 
   async function handleSubmit() {
-    if (submitting || location.status !== 'ready') return
+    if (busy || location.status !== 'ready') return
 
     const height = parseHeight(form.height)
     const errors = {
@@ -41,9 +51,28 @@ export default function FieldRegistrationScreen() {
     if (errors.species || errors.height) return
 
     Keyboard.dismiss()
-    setSubmitting(true)
     setSubmitError(null)
-    // photo_url is left out until photo capture is added, so it stays empty
+
+    // The photo goes up first, and the record is only saved if that worked. photo_url holds the
+    // storage path, not a URL, since the bucket is private.
+    let photoPath = null
+    if (form.photo) {
+      if (uploadedPhoto.current?.uri === form.photo.uri) {
+        photoPath = uploadedPhoto.current.path
+      } else {
+        setPhase('uploading')
+        const upload = await uploadPlantPhoto(form.photo.uri)
+        if (upload.error) {
+          setPhase(null)
+          setSubmitError(upload.error)
+          return
+        }
+        uploadedPhoto.current = { uri: form.photo.uri, path: upload.data }
+        photoPath = upload.data
+      }
+    }
+
+    setPhase('saving')
     const { data, error } = await submitPlant({
       species_id: form.species.id,
       height_cm: height.value,
@@ -51,8 +80,9 @@ export default function FieldRegistrationScreen() {
       latitude: location.coords.latitude,
       longitude: location.coords.longitude,
       location_description: form.locationDescription.trim() || null,
+      photo_url: photoPath,
     })
-    setSubmitting(false)
+    setPhase(null)
 
     // On failure everything entered stays in the form so it can be submitted again
     if (error) {
@@ -69,6 +99,7 @@ export default function FieldRegistrationScreen() {
     setFieldErrors({})
     setSubmitError(null)
     setSavedPlant(null)
+    uploadedPhoto.current = null
     location.refresh()
   }
 
@@ -92,10 +123,12 @@ export default function FieldRegistrationScreen() {
               value={form.species}
               onChange={setField('species')}
               error={fieldErrors.species}
+              disabled={busy}
               style={styles.field}
             />
             <TextInput
               label="Height (cm, optional)"
+              editable={!busy}
               value={form.height}
               onChangeText={setField('height')}
               error={fieldErrors.height}
@@ -104,6 +137,7 @@ export default function FieldRegistrationScreen() {
             />
             <TextInput
               label="Morphological notes (optional)"
+              editable={!busy}
               value={form.notes}
               onChangeText={setField('notes')}
               multiline
@@ -111,6 +145,7 @@ export default function FieldRegistrationScreen() {
             />
             <TextInput
               label="Location description (optional)"
+              editable={!busy}
               value={form.locationDescription}
               onChangeText={setField('locationDescription')}
               placeholder="e.g. Beside the trail to the Great Cave"
@@ -118,7 +153,15 @@ export default function FieldRegistrationScreen() {
               style={styles.field}
             />
 
-            <LocationPanel location={location} />
+            <PhotoField
+              label="Photo (optional)"
+              value={form.photo}
+              onChange={setField('photo')}
+              disabled={busy}
+              style={styles.field}
+            />
+
+            <LocationPanel location={location} disabled={busy} />
 
             {submitError ? (
               <Text style={styles.formError} accessibilityLiveRegion="polite">
@@ -127,9 +170,9 @@ export default function FieldRegistrationScreen() {
             ) : null}
 
             <Button
-              title={submitting ? 'Submitting…' : 'Submit registration'}
+              title={SUBMIT_TITLES[phase] ?? 'Submit registration'}
               onPress={handleSubmit}
-              disabled={submitting || location.status !== 'ready'}
+              disabled={busy || location.status !== 'ready'}
             />
             {location.status !== 'ready' ? (
               <Text style={styles.hint}>You can submit once your location has been captured.</Text>
@@ -141,7 +184,7 @@ export default function FieldRegistrationScreen() {
   )
 }
 
-function LocationPanel({ location }) {
+function LocationPanel({ location, disabled }) {
   const { status, coords, message, refresh } = location
 
   return (
@@ -168,7 +211,7 @@ function LocationPanel({ location }) {
         title="Refresh location"
         variant="secondary"
         onPress={refresh}
-        disabled={status === 'locating'}
+        disabled={disabled || status === 'locating'}
       />
     </View>
   )

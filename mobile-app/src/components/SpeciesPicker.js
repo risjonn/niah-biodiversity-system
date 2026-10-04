@@ -18,7 +18,7 @@ import { theme } from '../theme/theme'
 
 // A form field for choosing a species. Looks like TextInput (label, box, error beneath) and opens
 // a searchable list in a modal. Loads the species list itself when first shown.
-export default function SpeciesPicker({ label, value, onChange, error, style }) {
+export default function SpeciesPicker({ label, value, onChange, error, disabled = false, style }) {
   const { fetchSpecies } = useSpecies()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -62,10 +62,12 @@ export default function SpeciesPicker({ label, value, onChange, error, style }) 
       {label ? <Text style={styles.label}>{label}</Text> : null}
       <Pressable
         onPress={() => setOpen(true)}
+        disabled={disabled}
         accessibilityRole="button"
         accessibilityLabel={label}
+        accessibilityState={{ disabled }}
         accessibilityValue={{ text: value?.scientific_name ?? 'None chosen' }}
-        style={[styles.field, error && styles.fieldError]}
+        style={[styles.field, error && styles.fieldError, disabled && styles.fieldDisabled]}
       >
         {value ? (
           <SpeciesName species={value} />
@@ -175,6 +177,9 @@ const styles = StyleSheet.create({
   },
   fieldError: {
     borderColor: theme.colors.error,
+  },
+  fieldDisabled: {
+    opacity: 0.5,
   },
   placeholder: {
     fontFamily: 'Inter_400Regular',

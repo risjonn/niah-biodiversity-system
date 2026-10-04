@@ -27,6 +27,14 @@
         {
           "locationWhenInUsePermission": "Niah Biodiversity uses your location to record where each plant was found."
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Niah Biodiversity uses your photos so you can attach a picture to a plant record.",
+          "cameraPermission": "Niah Biodiversity uses the camera to photograph plants you register.",
+          "microphonePermission": false
+        }
       ]
     ]
   }
