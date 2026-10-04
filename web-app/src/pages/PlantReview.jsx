@@ -266,12 +266,7 @@ function PlantDetailDialog({ plant, isOwnRecord, actions, onClose }) {
           <DialogContent dividers>
             <Stack spacing={2}>
               {plant.photo_url ? (
-                <Box
-                  component="img"
-                  src={plant.photo_url}
-                  alt={`Photo of ${plant.qr_code}`}
-                  sx={{ width: '100%', borderRadius: 1, display: 'block' }}
-                />
+                <PlantPhoto path={plant.photo_url} alt={`Photo of ${plant.qr_code}`} />
               ) : null}
               <DetailField label="Species">
                 <SpeciesName species={plant.species} />
@@ -312,6 +307,58 @@ function PlantDetailDialog({ plant, isOwnRecord, actions, onClose }) {
         </>
       ) : null}
     </Dialog>
+  )
+}
+
+// photo_url is a path in the private plant-photos bucket, so the image is shown through a signed
+// URL. Loading lasts until both the URL and the image itself have arrived.
+function PlantPhoto({ path, alt }) {
+  const { getPlantPhotoUrl } = usePlants()
+  // Kept with the path it was loaded for, so a different record's photo never shows here
+  const [result, setResult] = useState(null)
+  const [imageStatus, setImageStatus] = useState({ url: null, status: null })
+
+  useEffect(() => {
+    let cancelled = false
+    getPlantPhotoUrl(path).then((nextResult) => {
+      if (!cancelled) setResult({ ...nextResult, path })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [getPlantPhotoUrl, path])
+
+  const url = result?.path === path ? result.data : null
+  const urlError = result?.path === path ? result.error : null
+  const imageState = imageStatus.url === url ? imageStatus.status : null
+
+  if (urlError) return <Alert severity="error">{urlError}</Alert>
+  if (imageState === 'error') {
+    return <Alert severity="error">This photo could not be displayed. Try again later.</Alert>
+  }
+
+  return (
+    <Box>
+      {imageState !== 'loaded' ? (
+        <Stack sx={{ alignItems: 'center', py: 4 }}>
+          <CircularProgress aria-label="Loading photo" />
+        </Stack>
+      ) : null}
+      {url ? (
+        <Box
+          component="img"
+          src={url}
+          alt={alt}
+          onLoad={() => setImageStatus({ url, status: 'loaded' })}
+          onError={() => setImageStatus({ url, status: 'error' })}
+          sx={{
+            width: '100%',
+            borderRadius: 1,
+            display: imageState === 'loaded' ? 'block' : 'none',
+          }}
+        />
+      ) : null}
+    </Box>
   )
 }
 
