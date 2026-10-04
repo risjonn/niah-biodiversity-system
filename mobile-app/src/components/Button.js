@@ -1,17 +1,21 @@
 import { Pressable, Text, StyleSheet } from 'react-native'
 import { theme } from '../theme/theme'
 
-export default function Button({ title, onPress, variant = 'primary' }) {
+export default function Button({ title, onPress, variant = 'primary', disabled = false }) {
   const isPrimary = variant === 'primary'
 
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
       style={({ pressed }) => [
         styles.base,
         { backgroundColor: isPrimary ? theme.colors.primary : theme.colors.surfaceWhite },
         { borderWidth: isPrimary ? 0 : 1, borderColor: theme.colors.border },
         pressed && { opacity: 0.8 },
+        disabled && styles.disabled,
       ]}
     >
       <Text
@@ -28,14 +32,17 @@ export default function Button({ title, onPress, variant = 'primary' }) {
 
 const styles = StyleSheet.create({
   base: {
-    minHeight: 44,
-    borderRadius: 8,
+    minHeight: theme.buttonHeight,
+    borderRadius: theme.radius,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: theme.spacing.lg,
   },
   text: {
     fontFamily: 'Inter_500Medium',
-    fontSize: 16,
+    fontSize: theme.typography.body.fontSize,
+  },
+  disabled: {
+    opacity: 0.5,
   },
 })

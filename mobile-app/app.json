@@ -21,7 +21,13 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Niah Biodiversity uses your location to record where each plant was found."
+        }
+      ]
     ]
   }
 }
