@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
-import { containsAnyFilter, queryErrorMessage } from '../lib/queryHelpers'
+import { containsAnyFilter, countResult, queryErrorMessage } from '../lib/queryHelpers'
 
 // The species columns callers may set. id, created_by and the timestamps are managed here or by
 // the database, so they are never taken from the caller.
@@ -47,7 +47,19 @@ export function useSpecies() {
     [userId],
   )
 
-  return { fetchSpecies, fetchSpeciesById, createSpecies, updateSpecies, deleteSpecies }
+  return {
+    fetchSpecies,
+    fetchSpeciesById,
+    countSpecies,
+    createSpecies,
+    updateSpecies,
+    deleteSpecies,
+  }
+}
+
+// How many species are in the database, without loading them
+function countSpecies() {
+  return countResult(supabase.from('species').select('*', { count: 'exact', head: true }))
 }
 
 // All species, alphabetical by scientific name. `search` matches scientific name, common name or

@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
-import { containsAnyFilter, queryErrorMessage } from '../lib/queryHelpers'
+import { containsAnyFilter, countResult, queryErrorMessage } from '../lib/queryHelpers'
 
 // Each plant comes back with the basics of its species, for showing names without a second query
 const PLANT_WITH_SPECIES = '*, species(id, scientific_name, common_name, conservation_status)'
@@ -61,7 +61,32 @@ export function usePlants() {
     [userId],
   )
 
-  return { fetchPendingPlants, fetchApprovedPlants, reviewPlant }
+  return {
+    fetchPendingPlants,
+    fetchApprovedPlants,
+    countPendingPlants,
+    countApprovedPlants,
+    reviewPlant,
+  }
+}
+
+// How many records are waiting for review. Row-level security only counts pending records for
+// conservation officers and admins.
+function countPendingPlants() {
+  return countPlantsWithStatus('pending_review')
+}
+
+function countApprovedPlants() {
+  return countPlantsWithStatus('approved')
+}
+
+function countPlantsWithStatus(reviewStatus) {
+  return countResult(
+    supabase
+      .from('plants')
+      .select('*', { count: 'exact', head: true })
+      .eq('review_status', reviewStatus),
+  )
 }
 
 // The review queue, oldest first. Row-level security only returns other people's pending records
