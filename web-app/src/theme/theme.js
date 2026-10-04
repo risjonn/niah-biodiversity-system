@@ -45,10 +45,12 @@ export const theme = createTheme({
           fontWeight: 500,
           variants: [
             {
-              // Outlined buttons on the primary header use color="inherit" to pick up its white
-              // text, and MUI keeps their border as currentColor (white). The default hover tint
-              // is based on the dark text colour, so darken with primaryDark instead.
-              props: { variant: 'outlined', color: 'inherit' },
+              // Buttons on the primary header (the outlined log out button and the text nav
+              // links) use color="inherit" to pick up its white text, and MUI keeps an outlined
+              // border as currentColor (white). The default hover tint is based on the dark text
+              // colour, so darken with primaryDark instead.
+              props: ({ color, variant }) =>
+                color === 'inherit' && (variant === 'outlined' || variant === 'text'),
               style: {
                 '@media (hover: hover)': {
                   '&:hover': {

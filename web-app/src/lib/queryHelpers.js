@@ -25,6 +25,16 @@ export function queryErrorMessage(error) {
   }
 }
 
+// Runs a select made with { count: 'exact', head: true } and resolves to { data: count, error }.
+// A head request gets no response body, so when the database refuses one the error has no code or
+// message to go on. Only a network failure (code '') can be told apart from that.
+export async function countResult(query) {
+  const { count, error } = await query
+  if (!error) return { data: count ?? 0, error: null }
+  if (error.code === '') return { data: null, error: queryErrorMessage(error) }
+  return { data: null, error: 'This total could not be loaded. Try refreshing the page.' }
+}
+
 // A PostgREST `or` filter matching rows where any of `columns` contains `search`, ignoring case,
 // or null when there is nothing to search for. The search text is escaped so that %, _ and the
 // characters PostgREST treats as filter syntax (commas, brackets, quotes) match literally.
