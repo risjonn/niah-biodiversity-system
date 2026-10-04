@@ -11,6 +11,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Button from './Button'
+import ScientificName from './ScientificName'
 import TextInput from './TextInput'
 import { useSpecies } from '../hooks/useSpecies'
 import { theme } from '../theme/theme'
@@ -148,7 +149,7 @@ export default function SpeciesPicker({ label, value, onChange, error, style }) 
 function SpeciesName({ species }) {
   return (
     <View>
-      <Text style={styles.scientificName}>{species.scientific_name}</Text>
+      <ScientificName style={styles.scientificName}>{species.scientific_name}</ScientificName>
       {species.common_name ? <Text style={styles.commonName}>{species.common_name}</Text> : null}
     </View>
   )
@@ -187,8 +188,6 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.xs,
   },
   scientificName: {
-    fontFamily: 'Inter_400Regular',
-    fontStyle: 'italic',
     fontSize: theme.typography.body.fontSize,
     color: theme.colors.textPrimary,
   },

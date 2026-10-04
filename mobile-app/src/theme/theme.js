@@ -20,6 +20,10 @@ export const theme = {
     bodySmall: { fontSize: 14, fontWeight: '400' },
     caption: { fontSize: 12, fontWeight: '400' },
   },
+  // Loaded in App.js. Fonts with no family token here are still named directly in styles.
+  fontFamily: {
+    italic: 'Inter_400Regular_Italic',
+  },
   spacing: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32, xxxl: 48 },
   radius: 8,
   buttonHeight: 44,

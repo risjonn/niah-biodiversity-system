@@ -3,6 +3,7 @@ import { Keyboard, KeyboardAvoidingView, ScrollView, StyleSheet, Text, View } fr
 import { useHeaderHeight } from '@react-navigation/elements'
 import QRCode from 'react-native-qrcode-svg'
 import Button from '../components/Button'
+import ScientificName from '../components/ScientificName'
 import SpeciesPicker from '../components/SpeciesPicker'
 import TextInput from '../components/TextInput'
 import { useCurrentLocation } from '../hooks/useCurrentLocation'
@@ -178,8 +179,8 @@ function SavedPlant({ plant, onRegisterAnother }) {
     <View style={styles.saved}>
       <Text style={styles.savedHeading}>Plant registered</Text>
       <Text style={styles.savedText}>
-        {plant.species.scientific_name} has been saved and is waiting for review. Label the plant
-        with this QR code:
+        <ScientificName>{plant.species.scientific_name}</ScientificName> has been saved and is
+        waiting for review. Label the plant with this QR code:
       </Text>
       <Text style={styles.qrText} selectable>
         {plant.qr_code}
