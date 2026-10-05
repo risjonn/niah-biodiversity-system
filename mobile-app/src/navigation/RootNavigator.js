@@ -6,6 +6,7 @@ import HeaderIconButton from '../components/HeaderIconButton'
 import { useAuth } from '../context/AuthContext'
 import { theme } from '../theme/theme'
 import LoginScreen from '../screens/LoginScreen'
+import BotanistHomeScreen from '../screens/BotanistHomeScreen'
 import FieldRegistrationScreen from '../screens/FieldRegistrationScreen'
 import MyRecordsScreen from '../screens/MyRecordsScreen'
 import StaffHomeScreen from '../screens/StaffHomeScreen'
@@ -28,6 +29,7 @@ const screenOptions = {
 }
 
 const signedInScreens = {
+  BotanistHome: { component: BotanistHomeScreen, options: { title: 'Niah Biodiversity' } },
   FieldRegistration: { component: FieldRegistrationScreen, options: { title: 'Register Plant' } },
   MyRecords: { component: MyRecordsScreen, options: { title: 'My Records' } },
   StaffHome: { component: StaffHomeScreen, options: { title: 'Staff Dashboard' } },
@@ -39,7 +41,7 @@ const signedInScreens = {
 // Conservation officers' and admins' own screens come in later issues, so for now they land on
 // a placeholder dashboard.
 const screensByRole = {
-  botanist: ['FieldRegistration', 'MyRecords', 'Settings'],
+  botanist: ['BotanistHome', 'MyRecords', 'FieldRegistration', 'Settings'],
   conservation_officer: ['StaffHome', 'Settings'],
   admin: ['StaffHome', 'Settings'],
 }
