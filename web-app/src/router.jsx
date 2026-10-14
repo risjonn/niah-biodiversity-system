@@ -7,6 +7,7 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import SpeciesList from './pages/SpeciesList'
 import SpeciesDetail from './pages/SpeciesDetail'
+import SpeciesForm from './pages/SpeciesForm'
 import PlantReview from './pages/PlantReview'
 import SensorDashboard from './pages/SensorDashboard'
 import UserManagement from './pages/UserManagement'
@@ -27,7 +28,9 @@ export const router = createBrowserRouter([
       { path: '/', element: <RoleHomeRedirect /> },
       { path: '/dashboard', element: <Dashboard /> },
       { path: '/species', element: <SpeciesList /> },
+      { path: '/species/new', element: <SpeciesForm /> },
       { path: '/species/:id', element: <SpeciesDetail /> },
+      { path: '/species/:id/edit', element: <SpeciesForm /> },
       { path: '/review', element: <PlantReview /> },
       { path: '/sensors', element: <SensorDashboard /> },
       { path: '/users', element: <UserManagement /> },

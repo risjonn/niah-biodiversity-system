@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import {
   Alert,
+  Button,
   Chip,
   CircularProgress,
   MenuItem,
@@ -50,7 +51,17 @@ export default function SpeciesList() {
 
   return (
     <Stack spacing={3}>
-      <Typography variant="h1">Species</Typography>
+      <Stack
+        direction="row"
+        spacing={2}
+        useFlexGap
+        sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}
+      >
+        <Typography variant="h1">Species</Typography>
+        <Button component={RouterLink} to="/species/new" variant="contained">
+          Add species
+        </Button>
+      </Stack>
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
         <TextField

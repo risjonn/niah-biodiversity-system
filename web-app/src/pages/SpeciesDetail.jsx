@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Link as RouterLink, useParams } from 'react-router-dom'
+import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom'
 import {
   Alert,
   Box,
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   Paper,
   Skeleton,
   Stack,
@@ -38,7 +43,7 @@ const reviewStatusChipColors = {
   rejected: 'error',
 }
 
-// Read-only. Adding, editing and deleting species is #35.
+// Editing happens on SpeciesForm (/species/:id/edit); deleting is confirmed in a dialog here
 export default function SpeciesDetail() {
   const { id } = useParams()
   const { getSpeciesById } = useSpecies()
@@ -132,6 +137,7 @@ export default function SpeciesDetail() {
 function SpeciesContent({ species, plants, plantsError, onRetry }) {
   const status = species.conservation_status
   const statusLabel = conservationStatusLabels[status] ?? status
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false)
 
   return (
     <>
@@ -160,6 +166,14 @@ function SpeciesContent({ species, plants, plantsError, onRetry }) {
               Last updated {formatDateTime(species.updated_at)}
             </Typography>
           ) : null}
+          <Stack direction="row" spacing={1}>
+            <Button component={RouterLink} to={`/species/${species.id}/edit`} variant="outlined">
+              Edit
+            </Button>
+            <Button variant="outlined" color="error" onClick={() => setIsDeleteOpen(true)}>
+              Delete
+            </Button>
+          </Stack>
         </Stack>
       </Stack>
 
@@ -167,7 +181,82 @@ function SpeciesContent({ species, plants, plantsError, onRetry }) {
       <TextSection title="Cultural significance" text={species.cultural_significance} />
 
       <SpeciesRecords plants={plants} error={plantsError} onRetry={onRetry} />
+
+      <DeleteSpeciesDialog
+        open={isDeleteOpen}
+        species={species}
+        // If the records failed to load this is 0, and a refused delete is caught by its error
+        recordCount={plants.length}
+        onClose={() => setIsDeleteOpen(false)}
+      />
     </>
+  )
+}
+
+// A species with plant records can't be deleted (they reference it), so the dialog only offers
+// deleting when there are none
+function DeleteSpeciesDialog({ open, species, recordCount, onClose }) {
+  const navigate = useNavigate()
+  const { deleteSpecies, removeSpeciesPhoto } = useSpecies()
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [error, setError] = useState(null)
+  const hasRecords = recordCount > 0
+
+  function handleClose() {
+    if (isDeleting) return
+    setError(null)
+    onClose()
+  }
+
+  async function handleDelete() {
+    setIsDeleting(true)
+    setError(null)
+    const result = await deleteSpecies(species.id)
+    if (result.error) {
+      setError(result.error)
+      setIsDeleting(false)
+      return
+    }
+    // Not awaited: removeSpeciesPhoto never fails and leaving the page doesn't stop it
+    removeSpeciesPhoto(species.reference_photo_url)
+    // Replaced so Back doesn't return to the deleted species
+    navigate('/species', { replace: true })
+  }
+
+  const name = (
+    <Box component="span" sx={{ fontStyle: 'italic' }}>
+      {species.scientific_name}
+    </Box>
+  )
+
+  return (
+    <Dialog open={open} onClose={handleClose} fullWidth maxWidth="xs">
+      <DialogTitle>{hasRecords ? <>{name} can&apos;t be deleted</> : <>Delete {name}?</>}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2}>
+          <DialogContentText>
+            {hasRecords
+              ? `This species has ${recordCount} plant ${recordCount === 1 ? 'record' : 'records'} and cannot be deleted.`
+              : "This permanently removes the species and its reference photo. It can't be undone."}
+          </DialogContentText>
+          {error ? <Alert severity="error">{error}</Alert> : null}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        {hasRecords ? (
+          <Button onClick={handleClose}>Close</Button>
+        ) : (
+          <>
+            <Button onClick={handleClose} disabled={isDeleting}>
+              Cancel
+            </Button>
+            <Button variant="contained" color="error" onClick={handleDelete} disabled={isDeleting}>
+              {isDeleting ? 'Deleting…' : 'Delete'}
+            </Button>
+          </>
+        )}
+      </DialogActions>
+    </Dialog>
   )
 }
 
