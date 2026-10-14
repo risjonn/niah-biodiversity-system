@@ -70,6 +70,7 @@ export function usePlants() {
     fetchApprovedPlants,
     countPendingPlants,
     countApprovedPlants,
+    getPlantsBySpecies,
     getPlantPhotoUrl,
     reviewPlant,
   }
@@ -134,6 +135,20 @@ async function fetchApprovedPlants({ search, speciesId } = {}) {
   if (speciesId) query = query.eq('species_id', speciesId)
 
   const { data, error } = await query
+  if (error) return { data: [], error: plantErrorMessage(error) }
+  return { data, error: null }
+}
+
+// Every record of one species, newest first, with only the columns a species page lists. Row-level
+// security returns all of them to conservation officers and admins. Who recorded each one is left
+// out: profiles are only readable by their owner, so officers can't see other people's names.
+async function getPlantsBySpecies(speciesId) {
+  const { data, error } = await supabase
+    .from('plants')
+    .select('id, qr_code, review_status, recorded_at, location_description')
+    .eq('species_id', speciesId)
+    .order('recorded_at', { ascending: false })
+
   if (error) return { data: [], error: plantErrorMessage(error) }
   return { data, error: null }
 }
