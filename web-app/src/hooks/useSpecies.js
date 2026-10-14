@@ -49,7 +49,7 @@ export function useSpecies() {
 
   return {
     fetchSpecies,
-    fetchSpeciesById,
+    getSpeciesById,
     countSpecies,
     createSpecies,
     updateSpecies,
@@ -76,13 +76,19 @@ async function fetchSpecies({ search, conservationStatus } = {}) {
   return { data, error: null }
 }
 
-async function fetchSpeciesById(id) {
+// Resolves to the species, or to data: null with no error when there is no species with that id.
+// An id that isn't a UUID (a mistyped URL) can't match any row, so it is treated the same way
+// instead of being sent to the database and coming back as a format error.
+async function getSpeciesById(id) {
+  if (!UUID_PATTERN.test(id ?? '')) return { data: null, error: null }
+
   const { data, error } = await supabase.from('species').select('*').eq('id', id).maybeSingle()
 
   if (error) return { data: null, error: speciesErrorMessage(error) }
-  if (!data) return { data: null, error: 'That species could not be found.' }
   return { data, error: null }
 }
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 // Changes only the fields passed in `fields`; anything left out keeps its current value
 async function updateSpecies(id, fields) {
