@@ -1,10 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../lib/supabaseClient'
 
-// The last species list that loaded, so botanists can still register plants offline
+// The last species list that loaded, so botanists can still register plants offline and guests
+// can still look up scanned plants
 const CACHE_KEY = 'niah-species-cache'
 
-// Species list for pickers. Read-only here: species are managed on the web dashboard. Resolves to
+// Species list for pickers and guest plant lookups. Read-only here: species are managed on the web dashboard. Resolves to
 // { data, error, savedAt } and never throws, with `error` as a message ready to show on screen
 // (the same pattern as usePlants). `savedAt` is set when the server couldn't be reached and the
 // list saved on the phone was used instead: the ISO time that list was downloaded.
@@ -12,12 +13,14 @@ export function useSpecies() {
   return { fetchSpecies }
 }
 
-// Every species, alphabetical by scientific name. Species are public, so this works for any
-// signed-in user.
+// Every species, alphabetical by scientific name, with the details guest mode shows. Species are
+// public, so this works signed in or as a guest.
 async function fetchSpecies() {
   const { data, error } = await supabase
     .from('species')
-    .select('id, scientific_name, common_name')
+    .select(
+      'id, scientific_name, common_name, family, description, conservation_status, cultural_significance, reference_photo_url',
+    )
     .order('scientific_name')
 
   if (!error) {
