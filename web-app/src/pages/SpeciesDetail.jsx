@@ -26,6 +26,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { useSpecies } from '../hooks/useSpecies'
 import { usePlants } from '../hooks/usePlants'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
+import { formatDateTime } from '../lib/formatDateTime'
 
 // Matches the plant_review_status enum in database/schema/001_initial_schema.sql. Colours follow
 // docs/design-system.md: alert for waiting, success for approved, error for rejected.
@@ -426,15 +427,4 @@ function SpeciesRecords({ plants, error, onRetry }) {
       </Stack>
     </Paper>
   )
-}
-
-// Day before month, e.g. "4 Oct 2026, 9:18 pm", whatever the browser's own locale is
-function formatDateTime(value) {
-  return new Date(value).toLocaleString('en-MY', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
 }
