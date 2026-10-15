@@ -1,15 +1,20 @@
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native'
+import { useState } from 'react'
+import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import Button from '../components/Button'
 import { useAuth } from '../context/AuthContext'
+import { useSync } from '../context/SyncContext'
 import { theme } from '../theme/theme'
 
 export default function SettingsScreen() {
   const { user, role, signOut } = useAuth()
+  const { unsyncedCount } = useSync()
 
   function handleSignOut() {
     Alert.alert(
       'Sign out',
-      'Are you sure you want to sign out?',
+      unsyncedCount > 0
+        ? `You have ${unsyncedCount} ${unsyncedCount === 1 ? "record that hasn't" : "records that haven't"} synced. They'll stay on this phone and sync next time you sign in with this account.`
+        : 'Are you sure you want to sign out?',
       [
         {
           text: 'Cancel',
@@ -57,7 +62,7 @@ export default function SettingsScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Account</Text>
@@ -144,12 +149,65 @@ export default function SettingsScreen() {
         </View> 
       </View>
 
+      {__DEV__ ? <DeveloperSection /> : null}
+
       <View style={styles.signOutContainer}>
         <Button
           title="Sign out"
           variant="secondary"
           onPress={handleSignOut}
         />
+      </View>
+    </ScrollView>
+  )
+}
+
+// Development builds only: tools for testing the offline queue
+function DeveloperSection() {
+  const { paused, setPaused, addTestRecords } = useSync()
+  const [adding, setAdding] = useState(false)
+  const [message, setMessage] = useState(null)
+
+  async function handleAddTestRecords() {
+    setAdding(true)
+    setMessage(null)
+    const { data, error } = await addTestRecords()
+    setAdding(false)
+    setMessage(error ?? `Added ${data} test records to the queue.`)
+  }
+
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>Developer</Text>
+
+      <View style={styles.card}>
+        <View style={styles.actionRow}>
+          <View style={styles.actionContent}>
+            <Text style={styles.value}>Pause automatic sync</Text>
+            <Text style={styles.description}>
+              Records stay in the queue until you tap Sync now in My Records.
+            </Text>
+          </View>
+          <Switch
+            value={paused}
+            onValueChange={setPaused}
+            trackColor={{ true: theme.colors.primary, false: theme.colors.border }}
+            thumbColor={theme.colors.surfaceWhite}
+            accessibilityLabel="Pause automatic sync"
+          />
+        </View>
+
+        <View style={styles.divider} />
+
+        <View style={styles.item}>
+          <Button
+            title={adding ? 'Adding…' : 'Add 50 test records to the queue'}
+            variant="secondary"
+            onPress={handleAddTestRecords}
+            disabled={adding}
+          />
+          {message ? <Text style={styles.description}>{message}</Text> : null}
+        </View>
       </View>
     </View>
   )
@@ -165,8 +223,12 @@ function formatRole(role) {
 }
 
 const styles = StyleSheet.create({
+  scroll: {
+    backgroundColor: theme.colors.surface,
+  },
+
   container: {
-    flex: 1,
+    flexGrow: 1,
     padding: theme.spacing.lg,
     gap: theme.spacing.lg,
     backgroundColor: theme.colors.surface,
