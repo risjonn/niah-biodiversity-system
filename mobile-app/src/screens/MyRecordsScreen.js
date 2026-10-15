@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { usePlantPhoto } from '../hooks/usePlantPhoto'
 import { usePlants } from '../hooks/usePlants'
 import { useSpecies } from '../hooks/useSpecies'
 import { theme } from '../theme/theme'
 
 export default function MyRecordsScreen() {
+  const { getPlantPhotoUrl } = usePlantPhoto()
+  const [photoUrls, setPhotoUrls] = useState({})
   const { fetchMyPlants } = usePlants()
   const { fetchSpecies } = useSpecies()
 
@@ -42,6 +45,19 @@ export default function MyRecordsScreen() {
 
     setPlants(plantsResult.data)
     setSpecies(speciesResult.data)
+
+    const photoResults = await Promise.all(
+      plantsResult.data.map(async (plant) => {
+        if (!plant.photo_url) {
+          return [plant.id, null]
+        }
+
+        const result = await getPlantPhotoUrl(plant.photo_url)
+        return [plant.id, result.data]
+      })
+    )
+
+    setPhotoUrls(Object.fromEntries(photoResults))
     setLoading(false)
   }
 
@@ -104,6 +120,7 @@ export default function MyRecordsScreen() {
                 key={plant.id}
                 plant={plant}
                 species={plantSpecies}
+                photoUrl={photoUrls[plant.id]}
               />
             )
           })}
@@ -119,11 +136,27 @@ export default function MyRecordsScreen() {
   )
 }
 
-function PlantRecordCard({ plant, species }) {
+function PlantRecordCard({ plant, species, photoUrl }) {
   const status = getStatusInfo(plant.review_status)
 
   return (
     <View style={styles.card}>
+      {photoUrl ? (
+        <Image
+          source={{ uri: photoUrl }}
+          style={styles.plantImage}
+          resizeMode="cover"
+          accessibilityLabel="Uploaded plant photograph"
+        />
+      ) : plant.photo_url ? (
+        <Text style={styles.photoError}>
+          Unable to load plant photo.
+        </Text>
+      ) : (
+        <Text style={styles.photoPlaceholder}>
+          No photo uploaded
+        </Text>
+      )}
       <View style={styles.cardHeader}>
         <View style={styles.speciesContainer}>
           <Text style={styles.scientificName}>
@@ -245,6 +278,27 @@ function formatDate(date) {
 }
 
 const styles = StyleSheet.create({
+  plantImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: theme.radius,
+    backgroundColor: theme.colors.surface,
+  },
+
+  imagePlaceholder: {
+    width: '100%',
+    height: 160,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius,
+  },
+
+  placeholderText: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: theme.typography.bodySmall.fontSize,
+    color: theme.colors.textSecondary,
+  },
   container: {
     padding: theme.spacing.lg,
     paddingBottom: theme.spacing.xxl,

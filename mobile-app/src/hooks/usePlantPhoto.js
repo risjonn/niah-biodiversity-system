@@ -40,7 +40,23 @@ export function usePlantPhoto() {
     return { data: path, error: null }
   }
 
-  return { uploadPlantPhoto }
+  async function getPlantPhotoUrl(photoPath) {
+    if (!photoPath) {
+      return { data: null, error: null }
+    }
+
+    const { data, error } = await supabase.storage
+      .from(BUCKET)
+      .createSignedUrl(photoPath, 60 * 60)
+
+    if (error) {
+      return { data: null, error: error.message }
+    }
+
+    return { data: data.signedUrl, error: null }
+  }
+
+  return { uploadPlantPhoto, getPlantPhotoUrl }
 }
 
 function base64ToArrayBuffer(base64) {
