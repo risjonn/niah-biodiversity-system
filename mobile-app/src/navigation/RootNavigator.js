@@ -12,6 +12,7 @@ import MyRecordsScreen from '../screens/MyRecordsScreen'
 import StaffHomeScreen from '../screens/StaffHomeScreen'
 import GuestScanScreen from '../screens/GuestScanScreen'
 import SettingsScreen from '../screens/SettingsScreen'
+import PlantSpeciesScreen from '../screens/PlantSpeciesScreen'
 
 const Stack = createNativeStackNavigator()
 
@@ -31,6 +32,7 @@ const screenOptions = {
 const signedInScreens = {
   BotanistHome: { component: BotanistHomeScreen, options: { title: 'Niah Biodiversity' } },
   FieldRegistration: { component: FieldRegistrationScreen, options: { title: 'Register Plant' } },
+  PlantSpecies: { component: PlantSpeciesScreen, options: { title: 'Plant Species' } },
   MyRecords: { component: MyRecordsScreen, options: { title: 'My Records' } },
   StaffHome: { component: StaffHomeScreen, options: { title: 'Staff Dashboard' } },
   Settings: { component: SettingsScreen },
@@ -41,7 +43,7 @@ const signedInScreens = {
 // Conservation officers' and admins' own screens come in later issues, so for now they land on
 // a placeholder dashboard.
 const screensByRole = {
-  botanist: ['BotanistHome', 'MyRecords', 'FieldRegistration', 'Settings'],
+  botanist: ['BotanistHome', 'MyRecords', 'FieldRegistration', 'PlantSpecies', 'Settings'],
   conservation_officer: ['StaffHome', 'Settings'],
   admin: ['StaffHome', 'Settings'],
 }
