@@ -32,11 +32,19 @@
         "expo-image-picker",
         {
           "photosPermission": "Niah Biodiversity uses your photos so you can attach a picture to a plant record.",
-          "cameraPermission": "Niah Biodiversity uses the camera to photograph plants you register.",
+          "cameraPermission": "Niah Biodiversity uses the camera to photograph plants you register and to scan plant QR tags.",
           "microphonePermission": false
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Niah Biodiversity uses the camera to photograph plants you register and to scan plant QR tags.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ]
     ]
   }
 }
