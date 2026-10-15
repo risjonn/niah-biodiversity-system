@@ -1,8 +1,13 @@
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../lib/supabaseClient'
 
+// The last species list that loaded, so botanists can still register plants offline
+const CACHE_KEY = 'niah-species-cache'
+
 // Species list for pickers. Read-only here: species are managed on the web dashboard. Resolves to
-// { data, error } and never throws, with `error` as a message ready to show on screen (the same
-// pattern as usePlants).
+// { data, error, savedAt } and never throws, with `error` as a message ready to show on screen
+// (the same pattern as usePlants). `savedAt` is set when the server couldn't be reached and the
+// list saved on the phone was used instead: the ISO time that list was downloaded.
 export function useSpecies() {
   return { fetchSpecies }
 }
@@ -15,8 +20,34 @@ async function fetchSpecies() {
     .select('id, scientific_name, common_name')
     .order('scientific_name')
 
-  if (error) return { data: [], error: speciesErrorMessage(error) }
-  return { data, error: null }
+  if (!error) {
+    await saveSpecies(data)
+    return { data, error: null, savedAt: null }
+  }
+
+  const saved = await readSavedSpecies()
+  if (saved) return { data: saved.species, error: null, savedAt: saved.savedAt }
+  return { data: [], error: speciesErrorMessage(error), savedAt: null }
+}
+
+async function saveSpecies(species) {
+  try {
+    await AsyncStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({ savedAt: new Date().toISOString(), species }),
+    )
+  } catch {
+    // The fresh list is still returned; the previously saved one stays as the fallback
+  }
+}
+
+async function readSavedSpecies() {
+  try {
+    const saved = JSON.parse(await AsyncStorage.getItem(CACHE_KEY))
+    return Array.isArray(saved?.species) && saved.savedAt ? saved : null
+  } catch {
+    return null
+  }
 }
 
 function speciesErrorMessage(error) {
@@ -24,7 +55,7 @@ function speciesErrorMessage(error) {
     // Request never reached the database (offline, server unreachable)
     case '':
     case undefined:
-      return 'Unable to reach the server. Check your connection and try again.'
+      return 'Connect to the internet once to download the species list.'
     default:
       return error.message
   }

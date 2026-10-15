@@ -1,24 +1,49 @@
-import { useEffect, useState } from 'react'
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
+import Button from '../components/Button'
+import ScientificName from '../components/ScientificName'
+import { useSync } from '../context/SyncContext'
 import { usePlants } from '../hooks/usePlants'
 import { useSpecies } from '../hooks/useSpecies'
 import { theme } from '../theme/theme'
 
+const SYNC_STOPPED_MESSAGE =
+  "Couldn't reach the server. The records will sync automatically when you're back online."
+
 export default function MyRecordsScreen() {
   const { fetchMyPlants } = usePlants()
   const { fetchSpecies } = useSpecies()
+  const { records, syncing, syncedVersion, syncNow, retry, discard, markShown } = useSync()
 
   const [plants, setPlants] = useState([])
   const [species, setSpecies] = useState([])
   const [loading, setLoading] = useState(true)
+  // { message, offline } when the server records couldn't be loaded
   const [error, setError] = useState(null)
+  const [syncMessage, setSyncMessage] = useState(null)
+  // Records being retried or discarded, so their buttons can't be pressed twice
+  const [busyIds, setBusyIds] = useState([])
 
   useEffect(() => {
     loadRecords()
   }, [])
 
-  async function loadRecords() {
-    setLoading(true)
+  // Records that sync while this screen is open move from the queue to the server list
+  const openedAtSyncedVersion = useRef(syncedVersion)
+  useEffect(() => {
+    if (syncedVersion !== openedAtSyncedVersion.current) loadRecords({ quiet: true })
+  }, [syncedVersion])
+
+  async function loadRecords({ quiet = false } = {}) {
+    if (!quiet) setLoading(true)
     setError(null)
 
     const [plantsResult, speciesResult] = await Promise.all([
@@ -27,14 +52,14 @@ export default function MyRecordsScreen() {
     ])
 
     if (plantsResult.error) {
-      setError(plantsResult.error)
+      setError({ message: plantsResult.error, offline: !plantsResult.code })
       setPlants([])
       setLoading(false)
       return
     }
 
     if (speciesResult.error) {
-      setError(speciesResult.error)
+      setError({ message: speciesResult.error, offline: false })
       setPlants([])
       setLoading(false)
       return
@@ -49,7 +74,78 @@ export default function MyRecordsScreen() {
     return species.find((item) => item.id === plant.species_id)
   }
 
-  if (loading) {
+  const serverIds = new Set(plants.map((plant) => plant.id))
+  const unsynced = records.filter((record) => record.status !== 'synced')
+  // Synced records not in the server list yet, e.g. while offline: shown from the queue so the
+  // botanist still has their QR codes
+  const recentlySynced = records.filter(
+    (record) => record.status === 'synced' && !serverIds.has(record.id),
+  )
+  const hasQueue = unsynced.length > 0 || recentlySynced.length > 0
+  const syncedIdsInServerList = records
+    .filter((record) => record.status === 'synced' && serverIds.has(record.id))
+    .map((record) => record.id)
+    .join(',')
+
+  // Once a synced record shows in the server list, the queue doesn't need it any more
+  useEffect(() => {
+    if (syncedIdsInServerList) markShown(syncedIdsInServerList.split(','))
+  }, [syncedIdsInServerList, markShown])
+
+  // QR codes shown from the queue count as seen when the botanist leaves the screen, so the
+  // record doesn't vanish while they're reading it
+  const shownFromQueue = useRef(new Set())
+  useEffect(() => {
+    recentlySynced.forEach((record) => shownFromQueue.current.add(record.id))
+  })
+  useEffect(() => {
+    const shown = shownFromQueue.current
+    return () => markShown([...shown])
+  }, [markShown])
+
+  async function handleSyncNow() {
+    setSyncMessage(null)
+    const result = await syncNow()
+    if (!result) {
+      setSyncMessage("Couldn't sync. Try again.")
+    } else if (result.stopped) {
+      setSyncMessage(SYNC_STOPPED_MESSAGE)
+    }
+  }
+
+  async function withBusy(id, task) {
+    setBusyIds((ids) => [...ids, id])
+    try {
+      await task()
+    } finally {
+      setBusyIds((ids) => ids.filter((busyId) => busyId !== id))
+    }
+  }
+
+  function handleRetry(record) {
+    setSyncMessage(null)
+    withBusy(record.id, async () => {
+      const result = await retry(record.id)
+      if (result?.stopped) setSyncMessage(SYNC_STOPPED_MESSAGE)
+    })
+  }
+
+  function handleDiscard(record) {
+    Alert.alert(
+      'Discard record',
+      `Discard this ${record.species_scientific_name} record? It hasn't been saved to the server and will be deleted from this phone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: () => withBusy(record.id, () => discard(record.id)),
+        },
+      ],
+    )
+  }
+
+  if (loading && !hasQueue) {
     return (
       <View style={styles.center}>
         <ActivityIndicator
@@ -62,13 +158,13 @@ export default function MyRecordsScreen() {
     )
   }
 
-  if (error) {
+  if (error && !hasQueue) {
     return (
       <View style={styles.center}>
         <Text style={styles.errorTitle}>Unable to load records</Text>
-        <Text style={styles.errorText}>{error}</Text>
+        <Text style={styles.errorText}>{error.message}</Text>
 
-        <Pressable style={styles.retryButton} onPress={loadRecords}>
+        <Pressable style={styles.retryButton} onPress={() => loadRecords()}>
           <Text style={styles.retryText}>Try Again</Text>
         </Pressable>
       </View>
@@ -87,7 +183,62 @@ export default function MyRecordsScreen() {
         </Text>
       </View>
 
-      {plants.length === 0 ? (
+      {unsynced.length > 0 ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Waiting to sync</Text>
+          {unsynced.map((record) => (
+            <QueuedRecordCard
+              key={record.id}
+              record={record}
+              busy={busyIds.includes(record.id)}
+              onRetry={() => handleRetry(record)}
+              onDiscard={() => handleDiscard(record)}
+            />
+          ))}
+          {syncMessage ? <Text style={styles.syncMessage}>{syncMessage}</Text> : null}
+          <Button
+            title={syncing ? 'Syncing…' : 'Sync now'}
+            variant="secondary"
+            onPress={handleSyncNow}
+            disabled={syncing}
+          />
+        </View>
+      ) : null}
+
+      {recentlySynced.length > 0 ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Synced from this phone</Text>
+          {recentlySynced.map((record) => (
+            <QueuedRecordCard key={record.id} record={record} />
+          ))}
+        </View>
+      ) : null}
+
+      {hasQueue && (loading || error) ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Synced records</Text>
+          {loading ? (
+            <View style={styles.inlineStatus}>
+              <ActivityIndicator
+                color={theme.colors.primary}
+                accessibilityLabel="Loading plant records"
+              />
+              <Text style={styles.loadingText}>Loading your records…</Text>
+            </View>
+          ) : (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyText}>
+                {error.offline
+                  ? "Your synced records can't be loaded while you're offline."
+                  : error.message}
+              </Text>
+              <Button title="Try again" variant="secondary" onPress={() => loadRecords()} />
+            </View>
+          )}
+        </View>
+      ) : null}
+
+      {loading || error || (plants.length === 0 && hasQueue) ? null : plants.length === 0 ? (
         <View style={styles.emptyCard}>
           <Text style={styles.emptyTitle}>No plant records yet</Text>
           <Text style={styles.emptyText}>
@@ -111,11 +262,90 @@ export default function MyRecordsScreen() {
       )}
 
       {plants.length > 0 ? (
-        <Pressable style={styles.refreshButton} onPress={loadRecords}>
+        <Pressable style={styles.refreshButton} onPress={() => loadRecords()}>
           <Text style={styles.refreshText}>Refresh Records</Text>
         </Pressable>
       ) : null}
     </ScrollView>
+  )
+}
+
+const QUEUE_STATUS_LABELS = {
+  pending: 'Waiting to sync',
+  syncing: 'Syncing…',
+  failed: "Couldn't sync",
+  synced: 'Synced',
+}
+
+const QUEUE_STATUS_COLORS = {
+  pending: theme.colors.alert,
+  syncing: theme.colors.primary,
+  failed: theme.colors.error,
+  synced: theme.colors.success,
+}
+
+// A record from the phone's queue. Failed records get Try again and Discard.
+function QueuedRecordCard({ record, busy = false, onRetry, onDiscard }) {
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardHeader}>
+        <View style={styles.speciesContainer}>
+          <ScientificName style={styles.queuedScientificName}>
+            {record.species_scientific_name}
+          </ScientificName>
+          {record.species_common_name ? (
+            <Text style={styles.commonName}>{record.species_common_name}</Text>
+          ) : null}
+        </View>
+
+        <Text style={[styles.statusText, { color: QUEUE_STATUS_COLORS[record.status] }]}>
+          {QUEUE_STATUS_LABELS[record.status]}
+        </Text>
+      </View>
+
+      <View style={styles.divider} />
+
+      <View style={styles.details}>
+        {record.height_cm != null ? (
+          <DetailRow label="Height" value={`${record.height_cm} cm`} />
+        ) : null}
+        {record.location_description ? (
+          <DetailRow label="Location" value={record.location_description} />
+        ) : null}
+        {/* With the time, so two records of the same species can be told apart */}
+        <DetailRow label="Recorded" value={formatDateTime(record.recorded_at)} />
+        {record.status === 'synced' ? (
+          <DetailRow label="QR Code" value={record.qr_code} selectable />
+        ) : null}
+        {/* Synced records no longer have the copy on the phone, only the uploaded path */}
+        {record.local_photo_path || record.uploaded_photo_path ? (
+          <Text style={styles.photoAttached}>Photo attached</Text>
+        ) : null}
+      </View>
+
+      {record.morphological_notes ? (
+        <View style={styles.notes}>
+          <Text style={styles.notesLabel}>Notes</Text>
+          <Text style={styles.notesText}>{record.morphological_notes}</Text>
+        </View>
+      ) : null}
+
+      {record.status === 'failed' ? (
+        <>
+          <View style={styles.rejection}>
+            <Text style={styles.rejectionText}>{record.error_message}</Text>
+          </View>
+          <View style={styles.queueActions}>
+            <View style={styles.queueAction}>
+              <Button title="Try again" variant="secondary" onPress={onRetry} disabled={busy} />
+            </View>
+            <View style={styles.queueAction}>
+              <Button title="Discard" variant="secondary" onPress={onDiscard} disabled={busy} />
+            </View>
+          </View>
+        </>
+      ) : null}
+    </View>
   )
 }
 
@@ -161,7 +391,7 @@ function PlantRecordCard({ plant, species }) {
 
         <DetailRow
           label="Recorded"
-          value={formatDate(plant.recorded_at)}
+          value={formatDateTime(plant.recorded_at)}
         />
 
         <DetailRow
@@ -169,6 +399,10 @@ function PlantRecordCard({ plant, species }) {
           value={plant.qr_code}
           selectable
         />
+
+        {plant.photo_url ? (
+          <Text style={styles.photoAttached}>Photo attached</Text>
+        ) : null}
       </View>
 
       {plant.morphological_notes ? (
@@ -244,6 +478,18 @@ function formatDate(date) {
   })
 }
 
+// e.g. "15 Oct 2026, 6:45 pm". The time is built by hand rather than with toLocaleTimeString,
+// whose output (24-hour clock, "PM" or "p.m.") differs between Android and iOS.
+function formatDateTime(date) {
+  const day = formatDate(date)
+  if (day === 'Not available') return day
+
+  const parsedDate = new Date(date)
+  const hours = parsedDate.getHours()
+  const minutes = String(parsedDate.getMinutes()).padStart(2, '0')
+  return `${day}, ${hours % 12 || 12}:${minutes} ${hours < 12 ? 'am' : 'pm'}`
+}
+
 const styles = StyleSheet.create({
   container: {
     padding: theme.spacing.lg,
@@ -272,6 +518,50 @@ const styles = StyleSheet.create({
 
   list: {
     gap: theme.spacing.lg,
+  },
+
+  section: {
+    gap: theme.spacing.md,
+  },
+
+  sectionTitle: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: theme.typography.heading3.fontSize,
+    fontWeight: theme.typography.heading3.fontWeight,
+    color: theme.colors.textPrimary,
+  },
+
+  queuedScientificName: {
+    fontSize: theme.typography.heading3.fontSize,
+    color: theme.colors.textPrimary,
+  },
+
+  photoAttached: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: theme.typography.caption.fontSize,
+    fontWeight: theme.typography.caption.fontWeight,
+    color: theme.colors.textSecondary,
+  },
+
+  queueActions: {
+    flexDirection: 'row',
+    gap: theme.spacing.md,
+  },
+
+  queueAction: {
+    flex: 1,
+  },
+
+  syncMessage: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: theme.typography.bodySmall.fontSize,
+    color: theme.colors.textSecondary,
+  },
+
+  inlineStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
   },
 
   card: {

@@ -7,35 +7,40 @@ import PhotoField from '../components/PhotoField'
 import ScientificName from '../components/ScientificName'
 import SpeciesPicker from '../components/SpeciesPicker'
 import TextInput from '../components/TextInput'
+import { useSync } from '../context/SyncContext'
 import { useCurrentLocation } from '../hooks/useCurrentLocation'
-import { usePlantPhoto } from '../hooks/usePlantPhoto'
-import { usePlants } from '../hooks/usePlants'
 import { theme } from '../theme/theme'
 
 // Side length of the QR image shown after saving, big enough to scan from another phone
 const QR_CODE_SIZE = 200
 
-const SUBMIT_TITLES = { uploading: 'Uploading photo…', saving: 'Submitting…' }
+const SUBMIT_TITLES = { saving: 'Saving…', syncing: 'Submitting…' }
+
+// How long the form waits for a new record to sync before saying it's saved on the phone. On a
+// weak signal a request can hang for a minute; the record keeps syncing in the background.
+const SYNC_WAIT_MS = 15000
 
 const EMPTY_FORM = { species: null, height: '', notes: '', locationDescription: '', photo: null }
 
 export default function FieldRegistrationScreen() {
-  const { submitPlant } = usePlants()
-  const { uploadPlantPhoto } = usePlantPhoto()
+  const { records, waitingCount, failedCount, queueRecord } = useSync()
   const location = useCurrentLocation()
   const headerHeight = useHeaderHeight()
   const scrollRef = useRef(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [fieldErrors, setFieldErrors] = useState({})
-  // 'uploading' while the photo uploads, then 'saving' while the record is saved; null when idle
+  // 'saving' while the record is saved on the phone, then 'syncing' while it is sent; null when
+  // idle
   const [phase, setPhase] = useState(null)
   const busy = phase !== null
-  // The photo already uploaded for this form, so retrying after a failed save reuses it instead of
-  // uploading a second copy
-  const uploadedPhoto = useRef(null)
   const [submitError, setSubmitError] = useState(null)
-  // The record returned by submitPlant once saved, which swaps the form for its QR code
-  const [savedPlant, setSavedPlant] = useState(null)
+  // The queued record once saved, which swaps the form for its QR code or a saved-on-phone note
+  const [savedRecord, setSavedRecord] = useState(null)
+
+  // Follows the record as it syncs, so the QR code appears if it syncs while this screen is open.
+  // The last copy is kept if it leaves the queue.
+  const liveRecord = savedRecord && records.find((record) => record.id === savedRecord.id)
+  if (liveRecord && liveRecord !== savedRecord) setSavedRecord(liveRecord)
 
   const setField = (name) => (value) => setForm((current) => ({ ...current, [name]: value }))
 
@@ -53,43 +58,30 @@ export default function FieldRegistrationScreen() {
     Keyboard.dismiss()
     setSubmitError(null)
 
-    // The photo goes up first, and the record is only saved if that worked. photo_url holds the
-    // storage path, not a URL, since the bucket is private.
-    let photoPath = null
-    if (form.photo) {
-      if (uploadedPhoto.current?.uri === form.photo.uri) {
-        photoPath = uploadedPhoto.current.path
-      } else {
-        setPhase('uploading')
-        const upload = await uploadPlantPhoto(form.photo.uri)
-        if (upload.error) {
-          setPhase(null)
-          setSubmitError(upload.error)
-          return
-        }
-        uploadedPhoto.current = { uri: form.photo.uri, path: upload.data }
-        photoPath = upload.data
-      }
-    }
-
+    // Saved on the phone first (photo included), then synced: see context/SyncContext.js
     setPhase('saving')
-    const { data, error } = await submitPlant({
-      species_id: form.species.id,
+    const { data, error, attempt } = await queueRecord({
+      species: form.species,
       height_cm: height.value,
       morphological_notes: form.notes.trim() || null,
       latitude: location.coords.latitude,
       longitude: location.coords.longitude,
       location_description: form.locationDescription.trim() || null,
-      photo_url: photoPath,
+      photoUri: form.photo?.uri ?? null,
     })
-    setPhase(null)
 
     // On failure everything entered stays in the form so it can be submitted again
     if (error) {
+      setPhase(null)
       setSubmitError(error)
       return
     }
-    setSavedPlant({ ...data, species: form.species })
+
+    setPhase('syncing')
+    await Promise.race([attempt, wait(SYNC_WAIT_MS)])
+    setPhase(null)
+    // Swapped for the record's latest state from the queue on the next render
+    setSavedRecord(data)
     scrollRef.current?.scrollTo({ y: 0, animated: false })
   }
 
@@ -98,8 +90,7 @@ export default function FieldRegistrationScreen() {
     setForm(EMPTY_FORM)
     setFieldErrors({})
     setSubmitError(null)
-    setSavedPlant(null)
-    uploadedPhoto.current = null
+    setSavedRecord(null)
     location.refresh()
   }
 
@@ -114,8 +105,9 @@ export default function FieldRegistrationScreen() {
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
       >
-        {savedPlant ? (
-          <SavedPlant plant={savedPlant} onRegisterAnother={handleRegisterAnother} />
+        <QueueStatus waitingCount={waitingCount} failedCount={failedCount} />
+        {savedRecord ? (
+          <SavedRecord record={savedRecord} onRegisterAnother={handleRegisterAnother} />
         ) : (
           <>
             <SpeciesPicker
@@ -217,30 +209,79 @@ function LocationPanel({ location, disabled }) {
   )
 }
 
-function SavedPlant({ plant, onRegisterAnother }) {
+// Shown above the form while the queue has records that haven't synced
+function QueueStatus({ waitingCount, failedCount }) {
+  if (waitingCount === 0 && failedCount === 0) return null
+
+  return (
+    <View style={styles.queueStatus}>
+      {waitingCount > 0 ? (
+        <Text style={styles.queueStatusText}>
+          {waitingCount} {waitingCount === 1 ? 'record' : 'records'} waiting to sync
+        </Text>
+      ) : null}
+      {failedCount > 0 ? (
+        <Text style={styles.queueStatusError}>
+          {failedCount} {failedCount === 1 ? "record couldn't" : "records couldn't"} sync. See My
+          Records.
+        </Text>
+      ) : null}
+    </View>
+  )
+}
+
+// A record from the queue: its QR code once synced, otherwise a note that it's on the phone
+function SavedRecord({ record, onRegisterAnother }) {
+  const action = (
+    <View style={styles.savedAction}>
+      <Button title="Register another plant" onPress={onRegisterAnother} />
+    </View>
+  )
+
+  if (record.status !== 'synced') {
+    return (
+      <View style={styles.saved}>
+        <Text style={styles.savedHeadingQueued}>Plant saved</Text>
+        <Text style={styles.savedText}>
+          {record.status === 'failed'
+            ? `Saved on this phone, but it couldn't sync: ${withoutFinalStop(record.error_message)}. You can discard it in My Records.`
+            : "Saved on this phone. It will sync automatically when you're back online. The QR code will be created when it syncs."}
+        </Text>
+        {action}
+      </View>
+    )
+  }
+
   return (
     <View style={styles.saved}>
       <Text style={styles.savedHeading}>Plant registered</Text>
       <Text style={styles.savedText}>
-        <ScientificName>{plant.species.scientific_name}</ScientificName> has been saved and is
+        <ScientificName>{record.species_scientific_name}</ScientificName> has been saved and is
         waiting for review. Label the plant with this QR code:
       </Text>
       <Text style={styles.qrText} selectable>
-        {plant.qr_code}
+        {record.qr_code}
       </Text>
       <View style={styles.qrImage}>
         <QRCode
-          value={plant.qr_code}
+          value={record.qr_code}
           size={QR_CODE_SIZE}
           color={theme.colors.textPrimary}
           backgroundColor={theme.colors.surfaceWhite}
         />
       </View>
-      <View style={styles.savedAction}>
-        <Button title="Register another plant" onPress={onRegisterAnother} />
-      </View>
+      {action}
     </View>
   )
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// Error messages end with a full stop; the sentence they go into adds its own
+function withoutFinalStop(message) {
+  return (message ?? 'unknown error').replace(/\.\s*$/, '')
 }
 
 // Height is optional. Resolves to { value, error }, with value as a number of cm or null if blank.
@@ -314,6 +355,32 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
     fontSize: theme.typography.heading2.fontSize,
     color: theme.colors.success,
+  },
+  savedHeadingQueued: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: theme.typography.heading2.fontSize,
+    color: theme.colors.textPrimary,
+  },
+  queueStatus: {
+    padding: theme.spacing.md,
+    gap: theme.spacing.xs,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderLeftWidth: theme.spacing.xs,
+    borderLeftColor: theme.colors.alert,
+    borderRadius: theme.radius,
+    backgroundColor: theme.colors.surfaceWhite,
+    marginBottom: theme.spacing.lg,
+  },
+  queueStatusText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: theme.typography.bodySmall.fontSize,
+    color: theme.colors.textPrimary,
+  },
+  queueStatusError: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: theme.typography.bodySmall.fontSize,
+    color: theme.colors.error,
   },
   savedText: {
     fontFamily: 'Inter_400Regular',

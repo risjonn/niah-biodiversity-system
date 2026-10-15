@@ -1,15 +1,22 @@
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 
-// Plant records for the signed-in user. Both functions resolve to { data, error } and never throw:
-// `error` is a message ready to show on screen, so callers only track their own loading state
-// (the same split as signIn in AuthContext and LoginScreen).
+// Plant records for the signed-in user. Every function resolves to { data, error } and never
+// throws: `error` is a message ready to show on screen, so callers only track their own loading
+// state (the same split as signIn in AuthContext and LoginScreen). Failures also carry the raw
+// PostgREST `code` ('' when the request never reached the database) and HTTP `status`, for
+// callers such as the sync queue that need to tell a lost connection from a refused record.
 export function usePlants() {
   const { user } = useAuth()
   const userId = user?.id ?? null
 
-  // Saves a new plant and returns the inserted row, including the qr_code the database generates
+  // Saves a new plant and returns the inserted row, including the qr_code the database generates.
+  // `id` and `recorded_at` are optional: the offline queue passes the id it generated and the
+  // time the plant was recorded, otherwise the database defaults fill them in. If a plant with
+  // that id is already saved, the error has `alreadySaved: true`.
   async function submitPlant({
+    id,
+    recorded_at,
     species_id,
     height_cm,
     morphological_notes,
@@ -25,11 +32,13 @@ export function usePlants() {
       return { data: null, error: 'A species and location are required.' }
     }
 
-    // Only these fields are sent: review status, recorded_at and qr_code are left to the
-    // database defaults and triggers, and recorded_by is always the signed-in user
+    // Only these fields are sent: review status and qr_code are left to the database defaults and
+    // triggers, and recorded_by is always the signed-in user
     const { data, error } = await supabase
       .from('plants')
       .insert({
+        ...(id ? { id } : {}),
+        ...(recorded_at ? { recorded_at } : {}),
         species_id,
         height_cm,
         morphological_notes,
@@ -42,7 +51,24 @@ export function usePlants() {
       .select()
       .single()
 
-    if (error) return { data: null, error: plantErrorMessage(error) }
+    if (error) return { data: null, ...plantError(error) }
+    return { data, error: null }
+  }
+
+  // One of the signed-in user's own plants, or null as data if there is no such plant
+  async function fetchPlant(id) {
+    if (!userId) {
+      return { data: null, error: 'You need to be signed in to see your plant records.' }
+    }
+
+    const { data, error } = await supabase
+      .from('plants')
+      .select('*')
+      .eq('id', id)
+      .eq('recorded_by', userId)
+      .maybeSingle()
+
+    if (error) return { data: null, ...plantError(error) }
     return { data, error: null }
   }
 
@@ -58,14 +84,25 @@ export function usePlants() {
       .eq('recorded_by', userId)
       .order('recorded_at', { ascending: false })
 
-    if (error) return { data: [], error: plantErrorMessage(error) }
+    if (error) return { data: [], ...plantError(error) }
     return { data, error: null }
   }
 
-  return { submitPlant, fetchMyPlants }
+  return { submitPlant, fetchPlant, fetchMyPlants }
 }
 
-function plantErrorMessage(error) {
+function plantError(error) {
+  const alreadySaved = error.code === '23505' && /plants_pkey/.test(error.message ?? '')
+  return {
+    error: plantErrorMessage(error, alreadySaved),
+    code: error.code ?? '',
+    status: error.status,
+    ...(alreadySaved ? { alreadySaved } : {}),
+  }
+}
+
+function plantErrorMessage(error, alreadySaved) {
+  if (alreadySaved) return 'This plant record has already been saved.'
   switch (error.code) {
     // Request never reached the database (offline, server unreachable)
     case '':

@@ -35,7 +35,8 @@
           "cameraPermission": "Niah Biodiversity uses the camera to photograph plants you register.",
           "microphonePermission": false
         }
-      ]
+      ],
+      "expo-sqlite"
     ]
   }
 }

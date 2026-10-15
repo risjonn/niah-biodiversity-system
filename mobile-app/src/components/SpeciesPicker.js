@@ -99,6 +99,11 @@ export default function SpeciesPicker({ label, value, onChange, error, disabled 
               clearButtonMode="while-editing"
               returnKeyType="search"
             />
+            {result?.savedAt ? (
+              <Text style={styles.savedNote}>
+                Using the species list saved on {formatSavedDate(result.savedAt)}
+              </Text>
+            ) : null}
           </View>
 
           {!result ? (
@@ -157,6 +162,15 @@ function SpeciesName({ species }) {
   )
 }
 
+// e.g. "3 Oct 2026"
+function formatSavedDate(iso) {
+  return new Date(iso).toLocaleDateString('en-MY', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 const styles = StyleSheet.create({
   // label, field and error match TextInput so the picker sits in a form like any other field
   label: {
@@ -213,6 +227,11 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
     fontSize: theme.typography.heading2.fontSize,
     color: theme.colors.textPrimary,
+  },
+  savedNote: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: theme.typography.bodySmall.fontSize,
+    color: theme.colors.textSecondary,
   },
   modalFooter: {
     padding: theme.spacing.lg,
