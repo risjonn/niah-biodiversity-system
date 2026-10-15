@@ -36,6 +36,17 @@ export default function BotanistHomeScreen({ navigation }) {
             onPress={() => navigation.navigate('MyRecords')}
           />
         </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Plant Species Database</Text>
+          <Text style={styles.cardDescription}>
+            Search plant species by scientific or common name.
+          </Text>
+          <Button
+            title="Search Plant Species"
+            onPress={() => navigation.navigate('PlantSpecies')}
+          />
+        </View>
       </View>
     </View>
   )
