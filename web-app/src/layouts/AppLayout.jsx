@@ -10,6 +10,7 @@ const NAV_LINKS = [
   { to: '/species', label: 'Species' },
   { to: '/review', label: 'Plant review' },
   { to: '/sensors', label: 'Sensors' },
+  { to: '/reports', label: 'Reports' },
   { to: '/users', label: 'Users', adminOnly: true },
 ]
 
