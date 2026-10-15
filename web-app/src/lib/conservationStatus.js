@@ -20,7 +20,9 @@ export const conservationStatusLabels = {
 // listed use the neutral 'default'.
 const chipColors = {
   least_concern: 'success',
+  near_threatened: 'secondary',
   vulnerable: 'warning',
+  endangered: 'error',
   critically_endangered: 'error',
 }
 
