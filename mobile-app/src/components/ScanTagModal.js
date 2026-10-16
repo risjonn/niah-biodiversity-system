@@ -5,12 +5,19 @@ import QrScanner from './QRScanner'
 import { usePlantLookup } from '../hooks/usePlantLookup'
 import { theme } from '../theme/theme'
 
-// Scan a tag as a signed-in botanist. Opens the record if found, otherwise says why not.
-// Render it only while open, so its state starts fresh each time.
-export default function ScanTagModal({ onClose, onFound }) {
+const REVIEW_STATUS_LABELS = {
+  approved: 'Approved',
+  pending_review: 'Pending review',
+  rejected: 'Rejected',
+}
+
+// Scan a tag as a signed-in botanist. Says whether the tag is already registered, and if so its
+// review status. Render it only while open, so its state starts fresh each time.
+export default function ScanTagModal({ onClose }) {
   const lookUp = usePlantLookup()
   const [scanning, setScanning] = useState(true)
-  const [message, setMessage] = useState(null)
+  // What the last scan found: { plant } or { message }; null while scanning
+  const [result, setResult] = useState(null)
   const [checking, setChecking] = useState(false)
   const scanLockedRef = useRef(false)
 
@@ -19,14 +26,13 @@ export default function ScanTagModal({ onClose, onFound }) {
     scanLockedRef.current = true
     setScanning(false)
     setChecking(true)
-    const result = await lookUp(data)
+    const found = await lookUp(data)
     setChecking(false)
-    if (result.plant) onFound(result.plant)
-    else setMessage(result.message)
+    setResult(found)
   }
 
   function scanAnother() {
-    setMessage(null)
+    setResult(null)
     scanLockedRef.current = false
     setScanning(true)
   }
@@ -38,14 +44,21 @@ export default function ScanTagModal({ onClose, onFound }) {
         <QrScanner scanning={scanning} onScan={handleScanned} />
 
         {checking ? <ActivityIndicator color={theme.colors.primary} accessibilityLabel="Checking" /> : null}
-        {message ? (
-          <View style={styles.card}>
-            <Text style={styles.body} accessibilityLiveRegion="polite">
-              {message}
-            </Text>
+        {result ? (
+          <View style={styles.card} accessibilityLiveRegion="polite">
+            {result.plant ? (
+              <>
+                <Text style={styles.body}>Already registered: {result.plant.qr_code}</Text>
+                <Text style={styles.status}>
+                  {REVIEW_STATUS_LABELS[result.plant.review_status]}
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.body}>{result.message}</Text>
+            )}
           </View>
         ) : null}
-        {message ? <Button title="Scan another" onPress={scanAnother} /> : null}
+        {result ? <Button title="Scan another" onPress={scanAnother} /> : null}
         <Button title="Close" variant="secondary" onPress={onClose} />
       </View>
     </Modal>
@@ -75,5 +88,11 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     fontSize: theme.typography.body.fontSize,
     color: theme.colors.textPrimary,
+  },
+  status: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: theme.typography.bodySmall.fontSize,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.xs,
   },
 })
