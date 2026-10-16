@@ -10,6 +10,7 @@ import SpeciesDetail from './pages/SpeciesDetail'
 import SpeciesForm from './pages/SpeciesForm'
 import PlantReview from './pages/PlantReview'
 import SensorDashboard from './pages/SensorDashboard'
+import Reports from './pages/Reports'
 import UserManagement from './pages/UserManagement'
 
 export const router = createBrowserRouter([
@@ -33,6 +34,7 @@ export const router = createBrowserRouter([
       { path: '/species/:id/edit', element: <SpeciesForm /> },
       { path: '/review', element: <PlantReview /> },
       { path: '/sensors', element: <SensorDashboard /> },
+      { path: '/reports', element: <Reports /> },
       { path: '/users', element: <UserManagement /> },
     ],
   },

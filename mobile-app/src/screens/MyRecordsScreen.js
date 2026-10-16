@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +15,7 @@ import { useSync } from '../context/SyncContext'
 import { usePlants } from '../hooks/usePlants'
 import { useSpecies } from '../hooks/useSpecies'
 import { theme } from '../theme/theme'
+import { usePlantPhoto } from '../hooks/usePlantPhoto'
 
 const SYNC_STOPPED_MESSAGE =
   "Couldn't reach the server. The records will sync automatically when you're back online."
@@ -349,6 +351,42 @@ function QueuedRecordCard({ record, busy = false, onRetry, onDiscard }) {
   )
 }
 
+function PlantRecordPhoto({ photoPath }) {
+  const { getPlantPhotoUrl } = usePlantPhoto()
+  const [photoUrl, setPhotoUrl] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadPhoto() {
+      if (!photoPath) return
+
+      const result = await getPlantPhotoUrl(photoPath)
+
+      if (!cancelled && !result.error) {
+        setPhotoUrl(result.data)
+      }
+    }
+
+    loadPhoto()
+
+    return () => {
+      cancelled = true
+    }
+  }, [photoPath])
+
+  if (!photoUrl) return null
+
+  return (
+    <Image
+      source={{ uri: photoUrl }}
+      style={styles.plantPhoto}
+      resizeMode="cover"
+      accessibilityLabel="Plant record photo"
+    />
+  )
+}
+
 function PlantRecordCard({ plant, species }) {
   const status = getStatusInfo(plant.review_status)
 
@@ -401,7 +439,7 @@ function PlantRecordCard({ plant, species }) {
         />
 
         {plant.photo_url ? (
-          <Text style={styles.photoAttached}>Photo attached</Text>
+          <PlantRecordPhoto photoPath={plant.photo_url} />
         ) : null}
       </View>
 
@@ -774,5 +812,12 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.bodySmall.fontSize,
     fontWeight: '500',
     color: theme.colors.primary,
+  },
+
+  plantPhoto: {
+    width: '100%',
+    height: 220,
+    borderRadius: theme.radius,
+    backgroundColor: theme.colors.surface,
   },
 })
