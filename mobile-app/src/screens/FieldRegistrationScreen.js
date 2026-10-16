@@ -4,6 +4,7 @@ import { useHeaderHeight } from '@react-navigation/elements'
 import QRCode from 'react-native-qrcode-svg'
 import Button from '../components/Button'
 import PhotoField from '../components/PhotoField'
+import ScanTagModal from '../components/ScanTagModal'
 import ScientificName from '../components/ScientificName'
 import SpeciesPicker from '../components/SpeciesPicker'
 import TextInput from '../components/TextInput'
@@ -36,6 +37,8 @@ export default function FieldRegistrationScreen() {
   const [submitError, setSubmitError] = useState(null)
   // The queued record once saved, which swaps the form for its QR code or a saved-on-phone note
   const [savedRecord, setSavedRecord] = useState(null)
+  // Whether the "Scan tag" scanner is open
+  const [scanOpen, setScanOpen] = useState(false)
 
   // Follows the record as it syncs, so the QR code appears if it syncs while this screen is open.
   // The last copy is kept if it leaves the queue.
@@ -110,6 +113,18 @@ export default function FieldRegistrationScreen() {
           <SavedRecord record={savedRecord} onRegisterAnother={handleRegisterAnother} />
         ) : (
           <>
+            <View style={styles.field}>
+              <Button
+                title="Scan tag"
+                variant="secondary"
+                onPress={() => setScanOpen(true)}
+                disabled={busy}
+              />
+            </View>
+            {scanOpen ? (
+              <ScanTagModal onClose={() => setScanOpen(false)} />
+            ) : null}
+
             <SpeciesPicker
               label="Species"
               value={form.species}

@@ -1,46 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
-  AppState,
   Image,
   Keyboard,
-  Linking,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native'
-import { CameraView, useCameraPermissions } from 'expo-camera'
-import { useIsFocused } from '@react-navigation/native'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import Button from '../components/Button'
 import ConservationStatusChip from '../components/ConservationStatusChip'
+import QrScanner from '../components/QRScanner'
 import ScientificName from '../components/ScientificName'
 import TextInput from '../components/TextInput'
 import { usePublicPlants } from '../hooks/usePublicPlants'
 import { useSpecies } from '../hooks/useSpecies'
+import { QR_CODE_PATTERN, normaliseQrCode } from '../lib/qrCode'
 import { theme } from '../theme/theme'
-
-// The format generate_plant_qr_code (database/schema/002) prints on plant tags
-const QR_CODE_PATTERN = /^NIAH-[0-9A-F]{6}$/
-
-const BARCODE_SETTINGS = { barcodeTypes: ['qr'] }
 
 // Guest mode: scan a plant's QR tag, or type its code, to see the approved record and its species.
 // Works offline from the plant and species lists saved on the phone. Guests are not signed in, so
 // only public data is used: the plants_public view and the species table.
 export default function GuestScanScreen() {
-  const isFocused = useIsFocused()
   const plants = usePublicPlants()
   const { fetchSpecies } = useSpecies()
   const [speciesResult, setSpeciesResult] = useState(null)
-  const [permission, requestPermission, getPermission] = useCameraPermissions()
-  const [cameraError, setCameraError] = useState(null)
+  // Reported by QrScanner: false while permission is off or the camera failed to start
+  const [cameraUsable, setCameraUsable] = useState(false)
   const [scanning, setScanning] = useState(true)
   // Set the moment a code is read, since the camera can report the same code several times before
   // `scanning` updates. Cleared only by "Scan another".
   const scanLockedRef = useRef(false)
-  const askedPermissionRef = useRef(false)
   const [code, setCode] = useState('')
   const [codeError, setCodeError] = useState(null)
   // { plant } or { message }, or null while nothing has been looked up
@@ -68,29 +59,13 @@ export default function GuestScanScreen() {
     [speciesResult],
   )
 
-  // Ask for the camera once when the screen opens, if the phone still lets the app ask
-  useEffect(() => {
-    if (permission && !permission.granted && permission.canAskAgain && !askedPermissionRef.current) {
-      askedPermissionRef.current = true
-      requestPermission()
-    }
-  }, [permission, requestPermission])
-
-  // Picks up a permission turned on in the phone settings when the user comes back to the app
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') getPermission()
-    })
-    return () => subscription.remove()
-  }, [getPermission])
-
   // Brings the result into view, below the camera and code box
   useEffect(() => {
     if (lookup) scrollRef.current?.scrollTo({ y: resultYRef.current, animated: true })
   }, [lookup])
 
   function lookUp(rawCode) {
-    const normalised = rawCode.trim().toUpperCase()
+    const normalised = normaliseQrCode(rawCode)
     if (!QR_CODE_PATTERN.test(normalised)) return { message: "This isn't a Niah plant tag." }
 
     const { data: plant, error } = plants.lookupByQrCode(normalised)
@@ -107,7 +82,7 @@ export default function GuestScanScreen() {
     setLookup(lookUp(rawCode))
   }
 
-  function handleScanned({ data }) {
+  function handleScanned(data) {
     if (scanLockedRef.current) return
     showLookup(data)
   }
@@ -137,7 +112,6 @@ export default function GuestScanScreen() {
     scrollRef.current?.scrollTo({ y: 0, animated: true })
   }
 
-  const cameraUsable = Boolean(permission?.granted) && !cameraError
   const loading = plants.loading || !speciesResult
 
   return (
@@ -175,55 +149,12 @@ export default function GuestScanScreen() {
         Point the camera at the QR code on a plant tag to learn about the plant.
       </Text>
 
-      {!permission ? (
-        <View style={[styles.cameraFrame, styles.cameraMessage]}>
-          <ActivityIndicator color={theme.colors.surfaceWhite} accessibilityLabel="Starting camera" />
-        </View>
-      ) : null}
-      {permission && !permission.granted ? (
-        <View style={styles.permissionBox}>
-          <Text style={styles.body}>
-            Camera access is off, so tags cannot be scanned. To turn it on, open your phone
-            settings, find this app and allow Camera. You can still type the code from the tag
-            below.
-          </Text>
-          {permission.canAskAgain ? (
-            <Button title="Allow camera" onPress={requestPermission} />
-          ) : null}
-          <Button
-            title="Open settings"
-            variant="secondary"
-            onPress={() => Linking.openSettings()}
-          />
-        </View>
-      ) : null}
-      {permission?.granted && cameraError ? (
-        <View style={styles.permissionBox}>
-          <Text style={styles.body}>{cameraError}</Text>
-        </View>
-      ) : null}
-      {cameraUsable ? (
-        <View style={styles.cameraFrame}>
-          {/* Only mounted while this screen is showing, so the camera turns off when it isn't */}
-          {isFocused ? (
-            <CameraView
-              style={StyleSheet.absoluteFill}
-              facing="back"
-              active={scanning}
-              barcodeScannerSettings={BARCODE_SETTINGS}
-              onBarcodeScanned={scanning ? handleScanned : undefined}
-              onMountError={() =>
-                setCameraError("The camera couldn't start. You can still type the code below.")
-              }
-            />
-          ) : null}
-          {!scanning ? (
-            <View style={[StyleSheet.absoluteFill, styles.pausedOverlay]}>
-              <Text style={styles.pausedText}>Scanning paused</Text>
-            </View>
-          ) : null}
-        </View>
-      ) : null}
+      <QrScanner
+        scanning={scanning}
+        onScan={handleScanned}
+        onUsableChange={setCameraUsable}
+        typeHint=" You can still type the code below."
+      />
 
       <View style={styles.codeBox}>
         <TextInput
@@ -403,36 +334,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     fontSize: theme.typography.body.fontSize,
     color: theme.colors.textPrimary,
-  },
-  cameraFrame: {
-    width: '100%',
-    aspectRatio: 1,
-    borderRadius: theme.radius,
-    overflow: 'hidden',
-    backgroundColor: theme.colors.textPrimary,
-  },
-  cameraMessage: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pausedOverlay: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.colors.primaryDark,
-    opacity: 0.85,
-  },
-  pausedText: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: theme.typography.body.fontSize,
-    color: theme.colors.surfaceWhite,
-  },
-  permissionBox: {
-    padding: theme.spacing.lg,
-    gap: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius,
-    backgroundColor: theme.colors.surfaceWhite,
   },
   codeBox: {
     gap: theme.spacing.sm,
