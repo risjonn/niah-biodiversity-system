@@ -13,12 +13,14 @@ import {
 import { useAuth } from '../context/AuthContext'
 import { useSpecies } from '../hooks/useSpecies'
 import { usePlants } from '../hooks/usePlants'
+import { useUsers } from '../hooks/useUsers'
 import { roleLabels } from '../lib/roles'
 
 export default function Dashboard() {
   const { fullName, role } = useAuth()
   const { countSpecies } = useSpecies()
   const { countPendingPlants, countApprovedPlants } = usePlants()
+  const { countUsers } = useUsers()
 
   return (
     <Stack spacing={4}>
@@ -33,6 +35,9 @@ export default function Dashboard() {
         <CountCard title="Pending reviews" to="/review" loadCount={countPendingPlants} />
         <CountCard title="Species" to="/species" loadCount={countSpecies} />
         <CountCard title="Approved plants" to="/species" loadCount={countApprovedPlants} />
+        {role === 'admin' && (
+          <CountCard title="Users" to="/users" loadCount={countUsers} />
+        )}
       </Grid>
     </Stack>
   )
