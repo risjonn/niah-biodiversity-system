@@ -1,3 +1,353 @@
+import { useEffect, useState } from 'react'
+import {
+  Alert,
+  Button,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  MenuItem,
+  Paper,
+  Snackbar,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+} from '@mui/material'
+import { useAuth } from '../context/AuthContext'
+import { useUsers, userRoleLabels, userRoles } from '../hooks/useUsers'
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 export default function UserManagement() {
-  return <div>User management — coming soon</div>
+  const { user: currentUser } = useAuth()
+  const { fetchUsers, createUser, updateUserRole } = useUsers()
+  const [result, setResult] = useState(null)
+  // Ids of users with a role change running, so their role box can't be changed twice
+  const [busyIds, setBusyIds] = useState(() => new Set())
+  const [createOpen, setCreateOpen] = useState(false)
+  // { email, password } of the account just created, shown once for the admin to pass on
+  const [tempPassword, setTempPassword] = useState(null)
+  // The message stays set while the snackbar fades out, so only `open` is cleared on close
+  const [snackbar, setSnackbar] = useState({ open: false })
+
+  useEffect(() => {
+    let cancelled = false
+    fetchUsers().then((nextResult) => {
+      if (!cancelled) setResult(nextResult)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [fetchUsers])
+
+  const users = result?.data ?? []
+
+  // A new key per message restarts the auto-hide timer when one message replaces another
+  function showSnackbar(severity, message) {
+    setSnackbar((current) => ({ open: true, severity, message, key: (current.key ?? 0) + 1 }))
+  }
+
+  function closeSnackbar() {
+    setSnackbar((current) => ({ ...current, open: false }))
+  }
+
+  async function handleRoleChange(user, role) {
+    if (busyIds.has(user.id) || role === user.role) return
+
+    setBusyIds((ids) => new Set(ids).add(user.id))
+    const { data, error } = await updateUserRole(user.id, role)
+    setBusyIds((ids) => {
+      const next = new Set(ids)
+      next.delete(user.id)
+      return next
+    })
+
+    if (error) {
+      showSnackbar('error', error)
+      return
+    }
+    setResult((current) => ({
+      ...current,
+      data: current.data.map((item) => (item.id === user.id ? data : item)),
+    }))
+    showSnackbar('success', `${user.full_name} is now ${userRoleLabels[role]}`)
+  }
+
+  // Resolves to an error message, or null once the account is created and the dialog can close
+  async function handleCreate(values) {
+    const { data, error } = await createUser(values)
+    if (error) return error
+
+    setResult((current) => ({ ...current, data: [...(current?.data ?? []), data.user] }))
+    setTempPassword({ email: data.user.email ?? values.email, password: data.tempPassword })
+    showSnackbar('success', `Created account for ${data.user.full_name ?? values.fullName}`)
+    return null
+  }
+
+  return (
+    <Stack spacing={3}>
+      <Stack
+        direction="row"
+        spacing={2}
+        useFlexGap
+        sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}
+      >
+        <Stack spacing={0.5}>
+          <Typography variant="h1">Users</Typography>
+          {result && !result.error ? (
+            <Typography variant="body1" color="text.secondary">
+              {users.length === 1 ? '1 account' : `${users.length} accounts`}
+            </Typography>
+          ) : null}
+        </Stack>
+        <Button variant="contained" onClick={() => setCreateOpen(true)}>
+          Add user
+        </Button>
+      </Stack>
+
+      {!result ? (
+        <Stack sx={{ alignItems: 'center', py: 4 }}>
+          <CircularProgress aria-label="Loading users" />
+        </Stack>
+      ) : null}
+      {result?.error ? <Alert severity="error">{result.error}</Alert> : null}
+      {result && !result.error && users.length === 0 ? (
+        <Typography variant="body1" color="text.secondary">
+          No users yet
+        </Typography>
+      ) : null}
+
+      {users.length > 0 ? (
+        <TableContainer component={Paper} variant="outlined">
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Name</TableCell>
+                <TableCell>Email</TableCell>
+                <TableCell>Role</TableCell>
+                <TableCell>Created</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {users.map((user) => (
+                <UserRow
+                  key={user.id}
+                  user={user}
+                  isSelf={Boolean(currentUser) && user.id === currentUser.id}
+                  busy={busyIds.has(user.id)}
+                  onRoleChange={(role) => handleRoleChange(user, role)}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      ) : null}
+
+      {/* Mounted only while open, so the form starts empty each time */}
+      {createOpen ? (
+        <CreateUserDialog onCreate={handleCreate} onClose={() => setCreateOpen(false)} />
+      ) : null}
+
+      <TempPasswordDialog
+        credentials={tempPassword}
+        onClose={() => setTempPassword(null)}
+        onCopied={() => showSnackbar('success', 'Password copied')}
+      />
+
+      <Snackbar
+        key={snackbar.key}
+        open={snackbar.open}
+        autoHideDuration={5000}
+        onClose={(_event, reason) => {
+          if (reason !== 'clickaway') closeSnackbar()
+        }}
+      >
+        <Alert
+          severity={snackbar.severity}
+          variant="filled"
+          onClose={closeSnackbar}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+    </Stack>
+  )
+}
+
+function UserRow({ user, isSelf, busy, onRoleChange }) {
+  return (
+    <TableRow>
+      <TableCell>
+        {user.full_name}
+        {isSelf ? (
+          <Typography variant="caption" component="span" color="text.secondary">
+            {' '}
+            (you)
+          </Typography>
+        ) : null}
+      </TableCell>
+      <TableCell>{user.email}</TableCell>
+      <TableCell>
+        {/* You can't change your own role, so the last admin can't lock everyone out */}
+        <TextField
+          select
+          size="small"
+          value={user.role ?? ''}
+          onChange={(event) => onRoleChange(event.target.value)}
+          disabled={busy || isSelf}
+          helperText={isSelf ? "You can't change your own role" : undefined}
+          slotProps={{ htmlInput: { 'aria-label': `Role for ${user.full_name}` } }}
+          sx={{ minWidth: 160 }}
+        >
+          {userRoles.map((role) => (
+            <MenuItem key={role} value={role}>
+              {userRoleLabels[role]}
+            </MenuItem>
+          ))}
+        </TextField>
+      </TableCell>
+      <TableCell>{new Date(user.created_at).toLocaleDateString()}</TableCell>
+    </TableRow>
+  )
+}
+
+// Stays open if the request fails, so what was typed isn't lost
+function CreateUserDialog({ onCreate, onClose }) {
+  const [form, setForm] = useState({ fullName: '', email: '', role: 'botanist' })
+  const [fieldErrors, setFieldErrors] = useState({})
+  const [submitError, setSubmitError] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  const setField = (name) => (event) =>
+    setForm((current) => ({ ...current, [name]: event.target.value }))
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    if (busy) return
+
+    const email = form.email.trim()
+    const errors = {
+      fullName: form.fullName.trim() ? null : 'Enter the full name.',
+      email: EMAIL_PATTERN.test(email) ? null : 'Enter a valid email address.',
+    }
+    setFieldErrors(errors)
+    if (errors.fullName || errors.email) return
+
+    setSubmitError(null)
+    setBusy(true)
+    const error = await onCreate({
+      fullName: form.fullName.trim(),
+      email,
+      role: form.role,
+    })
+    setBusy(false)
+
+    if (error) setSubmitError(error)
+    else onClose()
+  }
+
+  return (
+    <Dialog
+      open
+      onClose={busy ? undefined : onClose}
+      fullWidth
+      maxWidth="sm"
+      slotProps={{ paper: { component: 'form', onSubmit: handleSubmit, noValidate: true } }}
+    >
+      <DialogTitle>Add user</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ pt: 1 }}>
+          <TextField
+            label="Full name"
+            value={form.fullName}
+            onChange={setField('fullName')}
+            error={Boolean(fieldErrors.fullName)}
+            helperText={fieldErrors.fullName}
+            disabled={busy}
+            autoFocus
+            fullWidth
+          />
+          <TextField
+            label="Email"
+            type="email"
+            value={form.email}
+            onChange={setField('email')}
+            error={Boolean(fieldErrors.email)}
+            helperText={fieldErrors.email ?? 'A temporary password is generated for you to pass on.'}
+            disabled={busy}
+            fullWidth
+          />
+          <TextField
+            select
+            label="Role"
+            value={form.role}
+            onChange={setField('role')}
+            disabled={busy}
+            fullWidth
+          >
+            {userRoles.map((role) => (
+              <MenuItem key={role} value={role}>
+                {userRoleLabels[role]}
+              </MenuItem>
+            ))}
+          </TextField>
+          {submitError ? <Alert severity="error">{submitError}</Alert> : null}
+        </Stack>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2 }}>
+        <Button onClick={onClose} disabled={busy}>
+          Cancel
+        </Button>
+        <Button type="submit" variant="contained" loading={busy}>
+          Create account
+        </Button>
+      </DialogActions>
+    </Dialog>
+  )
+}
+
+// Shown once after an account is created. The password isn't stored anywhere in the page,
+// so closing this dialog is the last chance to copy it.
+function TempPasswordDialog({ credentials, onClose, onCopied }) {
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(credentials.password)
+      onCopied()
+    } catch {
+      // Clipboard blocked: the password is still on screen to copy by hand
+    }
+  }
+
+  return (
+    <Dialog open={Boolean(credentials)} onClose={onClose} fullWidth maxWidth="xs">
+      <DialogTitle>Account created</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2}>
+          <Typography variant="body1">
+            Pass this temporary password to {credentials?.email}. It won't be shown again.
+          </Typography>
+          <Typography
+            variant="body1"
+            sx={{ fontFamily: 'monospace', userSelect: 'all', wordBreak: 'break-all' }}
+          >
+            {credentials?.password}
+          </Typography>
+        </Stack>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2 }}>
+        <Button onClick={handleCopy}>Copy</Button>
+        <Button variant="contained" onClick={onClose}>
+          Done
+        </Button>
+      </DialogActions>
+    </Dialog>
+  )
 }

@@ -35,7 +35,15 @@ export const router = createBrowserRouter([
       { path: '/review', element: <PlantReview /> },
       { path: '/sensors', element: <SensorDashboard /> },
       { path: '/reports', element: <Reports /> },
-      { path: '/users', element: <UserManagement /> },
+      {
+        // Only admins can manage users and assign roles
+        path: '/users',
+        element: (
+          <ProtectedRoute allowedRoles={['admin']}>
+            <UserManagement />
+          </ProtectedRoute>
+        ),
+      },
     ],
   },
 ])
