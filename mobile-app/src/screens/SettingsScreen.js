@@ -1,13 +1,31 @@
-import { useState } from 'react'
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
+import { useRef, useState } from 'react'
+import {
+  Alert,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from 'react-native'
+import { useHeaderHeight } from '@react-navigation/elements'
 import Button from '../components/Button'
+import TextInput from '../components/TextInput'
 import { useAuth } from '../context/AuthContext'
 import { useSync } from '../context/SyncContext'
 import { theme } from '../theme/theme'
 
+const MIN_PASSWORD_LENGTH = 8
+const EMPTY_PASSWORD_FORM = { current: '', next: '', confirm: '' }
+
 export default function SettingsScreen() {
   const { user, role, signOut } = useAuth()
   const { unsyncedCount } = useSync()
+  const headerHeight = useHeaderHeight()
+  const [changingPassword, setChangingPassword] = useState(false)
 
   function handleSignOut() {
     Alert.alert(
@@ -62,103 +80,232 @@ export default function SettingsScreen() {
   }
 
   return (
-    <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
+    // automaticallyAdjustKeyboardInsets scrolls the focused field into view but only works on iOS.
+    // On Android the window doesn't resize for the keyboard, so the padding makes the room instead
+    // (using it on iOS as well would leave room for the keyboard twice).
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === 'android' ? 'padding' : undefined}
+      keyboardVerticalOffset={headerHeight}
+    >
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+      >
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Account</Text>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Account</Text>
 
-        <View style={styles.card}>
-          <View style={styles.item}>
-            <Text style={styles.label}>Email</Text>
-            <Text style={styles.value}>
-              {user?.email ?? 'Not available'}
-            </Text>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.item}>
-            <Text style={styles.label}>Role</Text>
-            <Text style={styles.value}>{formatRole(role)}</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>App</Text>
-
-        <View style={styles.card}>
-          <View style={styles.item}>
-            <Text style={styles.label}>App Version</Text>
-            <Text style={styles.value}>1.0.0</Text>
-          </View>
-
-          <View style={styles.divider} />
-
-          <Pressable style={styles.actionRow} onPress={showAbout}>
-            <View style={styles.actionContent}>
-              <Text style={styles.value}>About This App</Text>
-              <Text style={styles.description}>
-                Learn more about the biodiversity system.
+          <View style={styles.card}>
+            <View style={styles.item}>
+              <Text style={styles.label}>Email</Text>
+              <Text style={styles.value}>
+                {user?.email ?? 'Not available'}
               </Text>
             </View>
 
-            <Text style={styles.arrow}>›</Text>
-          </Pressable>
+            <View style={styles.divider} />
 
-          <View style={styles.divider} />
-
-          <Pressable style={styles.actionRow} onPress={showHelp}>
-            <View style={styles.actionContent}>
-              <Text style={styles.value}>Help & Support</Text>
-              <Text style={styles.description}>
-                Get help with using the application.
-              </Text>
+            <View style={styles.item}>
+              <Text style={styles.label}>Role</Text>
+              <Text style={styles.value}>{formatRole(role)}</Text>
             </View>
-
-            <Text style={styles.arrow}>›</Text>
-          </Pressable>
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Security</Text>
-
-        <View style={styles.securityCard}>
-          <View style={styles.securityContent}>
-            <Text style={styles.value}>Account Protection</Text>
-            <Text style={styles.description}>
-              Your account is protected by role-based access control.
-            </Text>
           </View>
         </View>
-      </View>
 
-      <View style={styles.section}> 
-        <Text style={styles.sectionTitle}>Data & Privacy</Text> 
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>App</Text>
+
+          <View style={styles.card}>
+            <View style={styles.item}>
+              <Text style={styles.label}>App Version</Text>
+              <Text style={styles.value}>1.0.0</Text>
+            </View>
+
+            <View style={styles.divider} />
+
+            <Pressable style={styles.actionRow} onPress={showAbout}>
+              <View style={styles.actionContent}>
+                <Text style={styles.value}>About This App</Text>
+                <Text style={styles.description}>
+                  Learn more about the biodiversity system.
+                </Text>
+              </View>
+
+              <Text style={styles.arrow}>›</Text>
+            </Pressable>
+
+            <View style={styles.divider} />
+
+            <Pressable style={styles.actionRow} onPress={showHelp}>
+              <View style={styles.actionContent}>
+                <Text style={styles.value}>Help & Support</Text>
+                <Text style={styles.description}>
+                  Get help with using the application.
+                </Text>
+              </View>
+
+              <Text style={styles.arrow}>›</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Security</Text>
+
+          <View style={styles.securityCard}>
+            <View style={styles.securityContent}>
+              <Text style={styles.value}>Account Protection</Text>
+              <Text style={styles.description}>
+                Your account is protected by role-based access control.
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <ChangePasswordSection saving={changingPassword} onSavingChange={setChangingPassword} />
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Data & Privacy</Text>
         
-        <View style={styles.card}> 
-          <Pressable style={styles.actionRow} onPress={showDataPrivacy}> 
-            <View style={styles.actionContent}> 
-              <Text style={styles.value}>Data & Privacy</Text> 
-              <Text style={styles.description}> Learn how location, photos, and account data are used. </Text>
-            </View> 
+          <View style={styles.card}> 
+            <Pressable style={styles.actionRow} onPress={showDataPrivacy}> 
+              <View style={styles.actionContent}> 
+                <Text style={styles.value}>Data & Privacy</Text> 
+                <Text style={styles.description}> Learn how location, photos, and account data are used. </Text>
+              </View> 
               
-            <Text style={styles.arrow}>›</Text> 
-          </Pressable> 
-        </View> 
-      </View>
+              <Text style={styles.arrow}>›</Text> 
+            </Pressable> 
+          </View> 
+        </View>
 
-      {__DEV__ ? <DeveloperSection /> : null}
+        {__DEV__ ? <DeveloperSection /> : null}
 
-      <View style={styles.signOutContainer}>
-        <Button
-          title="Sign out"
-          variant="secondary"
-          onPress={handleSignOut}
-        />
+        <View style={styles.signOutContainer}>
+          <Button
+            title="Sign out"
+            variant="secondary"
+            onPress={handleSignOut}
+            // The password check signs in again, which would undo a sign-out made while it runs
+            disabled={changingPassword}
+          />
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  )
+}
+
+function ChangePasswordSection({ saving, onSavingChange }) {
+  const { changePassword } = useAuth()
+  const [form, setForm] = useState(EMPTY_PASSWORD_FORM)
+  const [fieldErrors, setFieldErrors] = useState({})
+  const [submitError, setSubmitError] = useState(null)
+  const [changed, setChanged] = useState(false)
+  const newRef = useRef(null)
+  const confirmRef = useRef(null)
+
+  function setField(name, value) {
+    setForm((current) => ({ ...current, [name]: value }))
+    setChanged(false)
+  }
+
+  async function handleSubmit() {
+    if (saving) return
+
+    const errors = validatePasswordForm(form)
+    setFieldErrors(errors)
+    setSubmitError(null)
+    setChanged(false)
+    if (errors.current || errors.next || errors.confirm) return
+
+    Keyboard.dismiss()
+    onSavingChange(true)
+    const { error } = await changePassword(form.current, form.next)
+    onSavingChange(false)
+
+    if (error) {
+      setSubmitError(error)
+      return
+    }
+    setForm(EMPTY_PASSWORD_FORM)
+    setChanged(true)
+  }
+
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>Change password</Text>
+
+      <View style={styles.card}>
+        <View style={styles.passwordForm}>
+          <TextInput
+            label="Current password"
+            value={form.current}
+            onChangeText={(value) => setField('current', value)}
+            error={fieldErrors.current}
+            editable={!saving}
+            secureTextEntry
+            autoCapitalize="none"
+            autoComplete="current-password"
+            autoCorrect={false}
+            textContentType="password"
+            returnKeyType="next"
+            submitBehavior="submit"
+            onSubmitEditing={() => newRef.current?.focus()}
+          />
+          <TextInput
+            ref={newRef}
+            label="New password"
+            value={form.next}
+            onChangeText={(value) => setField('next', value)}
+            error={fieldErrors.next}
+            editable={!saving}
+            secureTextEntry
+            autoCapitalize="none"
+            autoComplete="new-password"
+            autoCorrect={false}
+            textContentType="newPassword"
+            returnKeyType="next"
+            submitBehavior="submit"
+            onSubmitEditing={() => confirmRef.current?.focus()}
+          />
+          <TextInput
+            ref={confirmRef}
+            label="Confirm new password"
+            value={form.confirm}
+            onChangeText={(value) => setField('confirm', value)}
+            error={fieldErrors.confirm}
+            editable={!saving}
+            secureTextEntry
+            autoCapitalize="none"
+            autoComplete="new-password"
+            autoCorrect={false}
+            textContentType="newPassword"
+            returnKeyType="go"
+            onSubmitEditing={handleSubmit}
+          />
+
+          {submitError ? (
+            <Text style={styles.passwordError} accessibilityLiveRegion="polite">
+              {submitError}
+            </Text>
+          ) : null}
+          {changed ? (
+            <Text style={styles.passwordSuccess} accessibilityLiveRegion="polite">
+              Your password has been changed.
+            </Text>
+          ) : null}
+
+          <Button
+            title={saving ? 'Changing password…' : 'Change password'}
+            onPress={handleSubmit}
+            disabled={saving}
+          />
+        </View>
       </View>
-    </ScrollView>
+    </View>
   )
 }
 
@@ -213,6 +360,25 @@ function DeveloperSection() {
   )
 }
 
+// Passwords are compared as typed, not trimmed: a space can be part of a password
+function validatePasswordForm({ current, next, confirm }) {
+  const errors = {
+    current: current ? null : 'Enter your current password.',
+    next: null,
+    confirm: null,
+  }
+
+  if (!next) errors.next = 'Enter a new password.'
+  else if (next.length < MIN_PASSWORD_LENGTH) {
+    errors.next = `New password must be at least ${MIN_PASSWORD_LENGTH} characters.`
+  }
+
+  if (!confirm) errors.confirm = 'Confirm your new password.'
+  else if (confirm !== next) errors.confirm = 'New passwords do not match.'
+
+  return errors
+}
+
 function formatRole(role) {
   if (!role) return 'Not available'
 
@@ -223,6 +389,10 @@ function formatRole(role) {
 }
 
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
+
   scroll: {
     backgroundColor: theme.colors.surface,
   },
@@ -317,6 +487,23 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: theme.spacing.lg,
     gap: theme.spacing.xs,
+  },
+
+  passwordForm: {
+    padding: theme.spacing.lg,
+    gap: theme.spacing.md,
+  },
+
+  passwordError: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: theme.typography.bodySmall.fontSize,
+    color: theme.colors.error,
+  },
+
+  passwordSuccess: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: theme.typography.bodySmall.fontSize,
+    color: theme.colors.success,
   },
 
   signOutContainer: {
