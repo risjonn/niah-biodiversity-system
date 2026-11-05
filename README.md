@@ -8,6 +8,7 @@ built for Sarawak Forestry Corporation (SFC) and NeuonAI. COS30049 group project
 - `mobile-app/` — React Native + Expo app (botanist field registration, guest QR-scan mode)
 - `web-app/` — React + Vite + Material UI app (officer dashboard, species knowledge base)
 - `database/` — Supabase schema, migrations, and seed data
+- `supabase/` — Supabase CLI config and Edge Functions (`invite-user`, `ingest-reading`)
 - `iot-firmware/` — ESP32 sensor code for plant protection monitoring
 - `docs/` — design system, proposal, and other project documentation
 
