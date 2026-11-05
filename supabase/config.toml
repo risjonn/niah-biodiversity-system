@@ -396,6 +396,9 @@ deno_version = 2
 [functions.invite-user]
 verify_jwt = false
 
+[functions.ingest-reading]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327
