@@ -5,6 +5,9 @@ import { ThemeProvider, CssBaseline } from "@mui/material";
 import { theme } from "./theme/theme.js";
 import { router } from "./router.jsx";
 import { AuthProvider } from "./context/AuthContext.jsx";
+import "@fontsource/inter/400.css";
+import "@fontsource/inter/500.css";
+import "@fontsource/inter/600.css";
 import "./index.css";
 
 createRoot(document.getElementById("root")).render(
