@@ -16,14 +16,15 @@ export const conservationStatusLabels = {
   critically_endangered: 'Critically endangered',
 }
 
-// MUI Chip colours, which come from the theme palette (warning is the alert token). Statuses not
-// listed use the neutral 'default'.
+// MUI Chip colours, which come from the theme palette (warning is the alert token, and
+// nearThreatened and criticallyEndangered are custom palette colours). They match
+// chartTokens.conservationStatus. Statuses not listed use the neutral 'default'.
 const chipColors = {
   least_concern: 'success',
-  near_threatened: 'secondary',
+  near_threatened: 'nearThreatened',
   vulnerable: 'warning',
   endangered: 'error',
-  critically_endangered: 'error',
+  critically_endangered: 'criticallyEndangered',
 }
 
 export function conservationStatusChipColor(status) {
