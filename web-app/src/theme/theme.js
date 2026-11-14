@@ -12,7 +12,14 @@ export const tokens = {
   textPrimary: '#22282A',
   textSecondary: '#5C6669',
   border: '#D8D6CF',
+  // Conservation statuses with no colour of their own in the palette above. Chosen so each
+  // status stays distinguishable from its neighbours for colour-blind readers.
+  nearThreatened: '#5BC99E',
+  criticallyEndangered: '#751E26',
 }
+
+// Fills in the light, dark and contrastText shades MUI needs for a custom palette colour
+const { augmentColor } = createTheme().palette
 
 export const theme = createTheme({
   palette: {
@@ -21,6 +28,15 @@ export const theme = createTheme({
     error: { main: tokens.error },
     success: { main: tokens.success },
     warning: { main: tokens.alert },
+    // Conservation status chip colours, see lib/conservationStatus.js
+    nearThreatened: augmentColor({
+      color: { main: tokens.nearThreatened, contrastText: tokens.textPrimary },
+      name: 'nearThreatened',
+    }),
+    criticallyEndangered: augmentColor({
+      color: { main: tokens.criticallyEndangered, contrastText: tokens.surfaceWhite },
+      name: 'criticallyEndangered',
+    }),
     background: { default: tokens.surface, paper: tokens.surfaceWhite },
     text: { primary: tokens.textPrimary, secondary: tokens.textSecondary },
   },
@@ -65,3 +81,39 @@ export const theme = createTheme({
     },
   },
 })
+
+// Chart colours and type. mobile-app/src/theme/theme.js has the same values as `theme.chart`.
+// See "Charts" in docs/design-system.md.
+export const chartTokens = {
+  // Series colours for charts where colour only says which series is which. Use them in this
+  // order and never cycle: the order keeps neighbouring series apart for colour-blind readers.
+  // Past six series, group the smallest into one "Other" series coloured `other`.
+  series: ['#1288A1', '#D39837', '#3C6C2A', '#47AEC7', '#B63325', '#759E4C'],
+  other: '#9EA6A9',
+  // review_status values, in the order to stack them. Same colours as the status chips. Keep
+  // pending between approved and rejected, because green and red look alike to red-green
+  // colour-blind readers.
+  reviewStatus: {
+    approved: tokens.success,
+    pending_review: tokens.alert,
+    rejected: tokens.error,
+  },
+  // conservation_status values, least to most threatened. Same colours as the chips.
+  conservationStatus: {
+    least_concern: tokens.success,
+    near_threatened: tokens.nearThreatened,
+    vulnerable: tokens.alert,
+    endangered: tokens.error,
+    critically_endangered: tokens.criticallyEndangered,
+  },
+  axis: tokens.border,
+  grid: '#E9E8E3',
+  label: tokens.textSecondary,
+  // Rounds the end of a bar away from the baseline
+  barRadius: 4,
+  fontFamily: theme.typography.fontFamily,
+  fontSize: {
+    tick: theme.typography.caption.fontSize,
+    label: theme.typography.body2.fontSize,
+  },
+}

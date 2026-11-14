@@ -2,17 +2,12 @@ import { StyleSheet, Text, View } from 'react-native'
 import { conservationStatusLabels } from '../lib/conservationStatus'
 import { theme } from '../theme/theme'
 
-// Chip background for each conservation_status. Statuses not listed use the neutral border colour.
-const chipColors = {
-  least_concern: theme.colors.success,
-  near_threatened: theme.colors.secondary,
-  vulnerable: theme.colors.alert,
-  endangered: theme.colors.error,
-  critically_endangered: theme.colors.error,
-}
+// Chip background for each conservation_status, the same colours charts use. Statuses not listed
+// use the neutral border colour.
+const chipColors = theme.chart.conservationStatus
 
-// The alert colour is too light for white text, so it (and the neutral chip) uses dark text
-const darkTextColors = [theme.colors.alert, theme.colors.border]
+// These are too light for white text, so they use dark text
+const darkTextColors = [theme.colors.nearThreatened, theme.colors.alert, theme.colors.border]
 
 // A species' conservation status as a small coloured label. `status` is a conservation_status value.
 export default function ConservationStatusChip({ status, style }) {
