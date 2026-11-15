@@ -23,6 +23,8 @@ The node must exist in `sensor_nodes`. `database/seed/002_sample_sensor_nodes.sq
 node simulate.js <node_identifier> [scenario] [--interval s] [--count n]
 ```
 
+To send past readings for the dashboard charts, see [Backfilling history](#backfilling-history).
+
 | Scenario | What it sends | Expected with the default thresholds |
 |---|---|---|
 | `normal` (default) | 24–30 °C, 70–90 % humidity, no motion | No alert |
@@ -48,6 +50,41 @@ one.
 
 Default thresholds are placeholders: temperature 18 to 35 °C, humidity 50 to 100 %, motion
 window 10 seconds. Nodes can have their own limits in `alert_thresholds`.
+
+## Backfilling history
+
+The sensor dashboard charts show the last 24 hours or 7 days. To give them something to show
+before the hardware is running, send readings with past `recorded_at` times:
+
+```
+node simulate.js --backfill <duration> <node_identifier>... [--every <duration>]
+```
+
+```
+node simulate.js --backfill 7d NIAH-NODE-01 NIAH-NODE-02
+node simulate.js --backfill 24h NIAH-NODE-01 --every 5m
+```
+
+- `--backfill` is how far back to start: `m`, `h` or `d`, up to `30d`. Readings run from then
+  up to now.
+- `--every` is the gap between readings (default `15m`, at least `1m`). Each time is nudged by
+  up to 30 seconds, like a real device.
+- List every node to fill. The simulator only has the device key, which can't list nodes, so it
+  can't find the active ones by itself. An inactive node (409) or unknown node (404) is skipped
+  after its first reading and reported at the end.
+
+The readings follow a daily cycle in Sarawak time: about 22 °C and 95 % humidity around 03:00,
+about 30 °C and 75 % around 15:00, with small differences between nodes and days. A few have
+short motion (1 to 8 s), more at night. Every value is inside the default limits, so a backfill
+raises no alerts unless a node has tighter limits of its own. `battery_level` starts between
+70 and 100 % and drops 1 to 3 % a day, so each node's battery ends on the newest value.
+
+Each node's readings are sent one at a time in time order, and nodes run side by side. 7 days
+at the default 15 minutes is 673 readings per node and takes a few minutes. A 5xx or network
+error is retried twice; any 4xx stops that node. Progress is printed every 10 %, and a summary
+per node at the end. The exit code is 1 if any reading was not saved.
+
+Run it once. Running it again adds a second set of readings over the same period.
 
 ## Format the gateway must send
 
