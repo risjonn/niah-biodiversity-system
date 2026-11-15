@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
-import { queryErrorMessage } from '../lib/queryHelpers'
+import { countResult, queryErrorMessage } from '../lib/queryHelpers'
 
 // Each alert comes with its node's identifier, and the name of whoever acknowledged it. Profiles
 // are only readable by their owner and by admins, so for a conservation officer the name is null
@@ -57,6 +57,7 @@ export function useSensors() {
   return {
     getNodeStatus,
     getAlerts,
+    countOpenAlerts,
     acknowledgeAlert,
     getRecentReadings,
     getGlobalThresholds,
@@ -86,6 +87,16 @@ async function getAlerts({ acknowledged = false } = {}) {
   const { data, error } = await query
   if (error) return { data: [], error: sensorErrorMessage(error) }
   return { data, error: null }
+}
+
+// How many alerts nobody has acknowledged yet, without loading them
+function countOpenAlerts() {
+  return countResult(
+    supabase
+      .from('alerts')
+      .select('*', { count: 'exact', head: true })
+      .eq('is_acknowledged', false),
+  )
 }
 
 // The node's latest readings, newest first by the device's own time
