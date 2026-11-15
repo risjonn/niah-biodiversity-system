@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 import { containsAnyFilter, countResult, queryErrorMessage } from '../lib/queryHelpers'
+import { conservationStatuses } from '../lib/conservationStatus'
 
 // The species columns callers may set. id, created_by and the timestamps are managed here or by
 // the database, so they are never taken from the caller.
@@ -58,6 +59,7 @@ export function useSpecies() {
     fetchSpecies,
     getSpeciesById,
     countSpecies,
+    countSpeciesByConservationStatus,
     createSpecies,
     updateSpecies,
     deleteSpecies,
@@ -70,6 +72,29 @@ export function useSpecies() {
 // How many species are in the database, without loading them
 function countSpecies() {
   return countResult(supabase.from('species').select('*', { count: 'exact', head: true }))
+}
+
+// How many species have each conservation status, as { status, count } rows in the order of
+// conservationStatuses (least to most threatened), with 0 for a status no species has. One count
+// per status rather than loading every species, so the API's row limit can't cut the totals short.
+async function countSpeciesByConservationStatus() {
+  const results = await Promise.all(
+    conservationStatuses.map((status) =>
+      countResult(
+        supabase
+          .from('species')
+          .select('*', { count: 'exact', head: true })
+          .eq('conservation_status', status),
+      ),
+    ),
+  )
+
+  const failed = results.find((result) => result.error)
+  if (failed) return { data: [], error: failed.error }
+  return {
+    data: conservationStatuses.map((status, index) => ({ status, count: results[index].data })),
+    error: null,
+  }
 }
 
 // All species, alphabetical by scientific name. `search` matches scientific name, common name or

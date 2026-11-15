@@ -65,10 +65,25 @@ export function usePlants() {
     [userId],
   )
 
+  // How many pending records the signed-in user can review. Their own records are left out,
+  // because nobody can review a record they recorded (database/schema/004 and 015).
+  const countPendingReviews = useCallback(() => {
+    if (!userId) {
+      return Promise.resolve({ data: null, error: 'You need to be signed in to see this total.' })
+    }
+    return countResult(
+      supabase
+        .from('plants')
+        .select('*', { count: 'exact', head: true })
+        .eq('review_status', 'pending_review')
+        .neq('recorded_by', userId),
+    )
+  }, [userId])
+
   return {
     fetchPendingPlants,
     fetchApprovedPlants,
-    countPendingPlants,
+    countPendingReviews,
     countApprovedPlants,
     getPlantsBySpecies,
     getPlantPhotoUrl,
@@ -89,27 +104,18 @@ async function getPlantPhotoUrl(path) {
   return { data: data.signedUrl, error: null }
 }
 
-// How many records are waiting for review. Row-level security only counts pending records for
-// conservation officers and admins.
-function countPendingPlants() {
-  return countPlantsWithStatus('pending_review')
-}
-
 function countApprovedPlants() {
-  return countPlantsWithStatus('approved')
-}
-
-function countPlantsWithStatus(reviewStatus) {
   return countResult(
     supabase
       .from('plants')
       .select('*', { count: 'exact', head: true })
-      .eq('review_status', reviewStatus),
+      .eq('review_status', 'approved'),
   )
 }
 
-// The review queue, oldest first. Row-level security only returns other people's pending records
-// to conservation officers and admins.
+// The review queue, oldest first. Row-level security returns every pending record to conservation
+// officers and admins, including ones they recorded themselves. Those stay in the list, but
+// database/schema/004 and 015 stop anyone reviewing their own record.
 async function fetchPendingPlants() {
   const { data, error } = await supabase
     .from('plants')
