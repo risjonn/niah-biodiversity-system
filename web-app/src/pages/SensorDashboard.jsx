@@ -28,16 +28,16 @@ import {
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { useAuth } from '../context/AuthContext'
+import SensorCharts from '../components/SensorCharts'
 import { useSensors } from '../hooks/useSensors'
 import { formatDateTime, formatRelativeTime } from '../lib/formatDateTime'
+// Battery levels below this (in %) are shown in the error colour. Shared with the battery chart.
+import { LOW_BATTERY_PERCENT } from '../lib/sensorCharts'
 
 // How often nodes and alerts reload while the page is open and the browser tab is visible
 const REFRESH_INTERVAL_MS = 15 * 1000
 // A node the server hasn't heard from for this long is shown as offline
 const OFFLINE_AFTER_MS = 15 * 60 * 1000
-// Battery levels below this (in %) are shown in the error colour. Display only, there are no
-// low-battery alerts yet.
-const LOW_BATTERY_PERCENT = 20
 
 // Matches the alert_type enum in database/schema/001_initial_schema.sql. Nothing raises
 // node_offline yet; offline status is worked out on this page from last_received_at.
@@ -66,6 +66,9 @@ export default function SensorDashboard() {
   // time on the page
   const [checkedAt, setCheckedAt] = useState(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  // Goes up on each press of Refresh, which also reloads the charts. The automatic refresh
+  // leaves them alone: hourly averages barely change in 15 seconds (see SensorCharts).
+  const [chartRefreshKey, setChartRefreshKey] = useState(0)
   // Only the newest load may update the page, so a slow earlier one can't overwrite newer data
   const latestLoad = useRef(0)
 
@@ -125,6 +128,7 @@ export default function SensorDashboard() {
 
   async function refresh() {
     setIsRefreshing(true)
+    setChartRefreshKey((current) => current + 1)
     await load()
     setIsRefreshing(false)
   }
@@ -185,6 +189,7 @@ export default function SensorDashboard() {
             now={checkedAt}
             onChanged={load}
           />
+          <SensorCharts nodes={snapshot.nodes} refreshKey={chartRefreshKey} />
           <NodesSection nodes={snapshot.nodes} now={checkedAt} />
           <ThresholdsCard />
         </>

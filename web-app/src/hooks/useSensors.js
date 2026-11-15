@@ -14,6 +14,7 @@ const ACKNOWLEDGED_ALERTS_LIMIT = 50
 
 const RECENT_READINGS_LIMIT = 20
 
+
 // Sensor nodes, their readings, alerts and alert limits for the sensor dashboard. Every function
 // resolves to { data, error } and never throws: `error` is a message ready to show on screen (the
 // same pattern as usePlants and useSpecies). All of these tables are readable only by conservation
@@ -60,7 +61,9 @@ export function useSensors() {
     countOpenAlerts,
     acknowledgeAlert,
     getRecentReadings,
+    getChartReadings,
     getGlobalThresholds,
+    getAlertThresholds,
   }
 }
 
@@ -107,6 +110,42 @@ async function getRecentReadings(nodeId) {
     .eq('sensor_node_id', nodeId)
     .order('recorded_at', { ascending: false })
     .limit(RECENT_READINGS_LIMIT)
+
+  if (error) return { data: [], error: sensorErrorMessage(error) }
+  return { data, error: null }
+}
+
+// Readings grouped per node per hour or day (Sarawak time), from report_sensor_chart in
+// database/schema/016_sensor_chart_report.sql. `from` and `to` are ISO date-time strings, `from`
+// inclusive and `to` exclusive, at most 31 days apart; `bucket` is 'hour' or 'day'. Each row is
+// { sensor_node_id, bucket_start, avg_temperature, avg_humidity, motion_events, readings }, oldest
+// bucket first. Only buckets with readings are returned.
+async function getChartReadings({ from, to, bucket }) {
+  const { data, count, error } = await supabase.rpc(
+    'report_sensor_chart',
+    { p_from: from, p_to: to, p_bucket: bucket },
+    // The total, to tell when the API's 1000-row limit has cut the result short
+    { count: 'exact' },
+  )
+
+  if (error) return { data: [], error: sensorErrorMessage(error) }
+  const rows = data ?? []
+  // A week of hourly rows is 168 per node, so this happens from about six nodes up. A partial
+  // result would leave the newest hours out, so it is an error rather than a gap.
+  if (count != null && count > rows.length) {
+    return {
+      data: [],
+      error: 'There are too many nodes to chart hourly for this period. Choose a shorter period.',
+    }
+  }
+  return { data: rows, error: null }
+}
+
+// Every alert limit row (009): the global default (sensor_node_id null) and any node's own limits
+async function getAlertThresholds() {
+  const { data, error } = await supabase
+    .from('alert_thresholds')
+    .select('sensor_node_id, temperature_min, temperature_max, humidity_min, humidity_max')
 
   if (error) return { data: [], error: sensorErrorMessage(error) }
   return { data, error: null }
