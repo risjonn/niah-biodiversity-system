@@ -23,6 +23,7 @@ import KeyboardDoubleArrowLeftIcon from '@mui/icons-material/KeyboardDoubleArrow
 import KeyboardDoubleArrowRightIcon from '@mui/icons-material/KeyboardDoubleArrowRight'
 import LocalFloristOutlinedIcon from '@mui/icons-material/LocalFloristOutlined'
 import PeopleOutlinedIcon from '@mui/icons-material/PeopleOutlined'
+import QrCode2OutlinedIcon from '@mui/icons-material/QrCode2Outlined'
 import SensorsOutlinedIcon from '@mui/icons-material/SensorsOutlined'
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore'
 import ContourPattern from './ContourPattern'
@@ -40,6 +41,7 @@ export const SIDEBAR_RAIL_WIDTH = 72
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard', icon: DashboardOutlinedIcon },
   { to: '/species', label: 'Species', icon: LocalFloristOutlinedIcon },
+  { to: '/records', label: 'Plant records', icon: QrCode2OutlinedIcon },
   {
     to: '/review',
     label: 'Plant review',

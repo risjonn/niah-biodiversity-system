@@ -4,7 +4,6 @@ import {
   Box,
   Button,
   Chip,
-  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -21,9 +20,9 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import ImageNotSupportedOutlinedIcon from '@mui/icons-material/ImageNotSupportedOutlined'
 import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
+import PlantPhoto from '../components/PlantPhoto'
 import TableSkeleton from '../components/TableSkeleton'
 import { useNavCounts } from '../context/NavCountsContext'
 import { useToast } from '../context/ToastContext'
@@ -31,6 +30,7 @@ import { usePlants } from '../hooks/usePlants'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
 import { formatDateTime } from '../lib/formatDateTime'
 import { mapUrl } from '../lib/mapUrl'
+import { formatCoordinates, formatHeight } from '../lib/plantFormat'
 
 // Hidden at tablet width and below, where the table runs out of room
 const HEIGHT_COLUMN_SX = { display: { xs: 'none', lg: 'table-cell' } }
@@ -252,16 +252,7 @@ function PlantDetailDialog({ plant, actions, onClose }) {
           <DialogContent dividers>
             <Stack direction={{ xs: 'column', md: 'row' }} spacing={3}>
               <Box sx={{ flex: { md: 1 }, minWidth: 0 }}>
-                {plant.photo_url ? (
-                  <PlantPhoto path={plant.photo_url} alt={`Photo of ${plant.qr_code}`} />
-                ) : (
-                  <PhotoFrame>
-                    <Stack spacing={1} sx={{ alignItems: 'center', color: 'text.secondary', py: 4 }}>
-                      <ImageNotSupportedOutlinedIcon aria-hidden="true" />
-                      <Typography variant="body2">No photo with this record</Typography>
-                    </Stack>
-                  </PhotoFrame>
-                )}
+                <PlantPhoto path={plant.photo_url} alt={`Photo of ${plant.qr_code}`} />
               </Box>
               <Stack spacing={2} sx={{ flex: { md: 1 }, minWidth: 0 }}>
                 <DetailField label="Species">
@@ -304,79 +295,6 @@ function PlantDetailDialog({ plant, actions, onClose }) {
         </>
       ) : null}
     </Dialog>
-  )
-}
-
-// The grey box the photo (or its loading, error or missing state) sits in
-function PhotoFrame({ children }) {
-  return (
-    <Box
-      sx={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: 1,
-        bgcolor: 'background.default',
-        overflow: 'hidden',
-      }}
-    >
-      {children}
-    </Box>
-  )
-}
-
-// photo_url is a path in the private plant-photos bucket, so the image is shown through a signed
-// URL. Loading lasts until both the URL and the image itself have arrived. The whole photo is
-// always shown (contained, not cropped), no taller than the viewport allows, so the dialog
-// doesn't need scrolling to see it.
-function PlantPhoto({ path, alt }) {
-  const { getPlantPhotoUrl } = usePlants()
-  // Kept with the path it was loaded for, so a different record's photo never shows here
-  const [result, setResult] = useState(null)
-  const [imageStatus, setImageStatus] = useState({ url: null, status: null })
-
-  useEffect(() => {
-    let cancelled = false
-    getPlantPhotoUrl(path).then((nextResult) => {
-      if (!cancelled) setResult({ ...nextResult, path })
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [getPlantPhotoUrl, path])
-
-  const url = result?.path === path ? result.data : null
-  const urlError = result?.path === path ? result.error : null
-  const imageState = imageStatus.url === url ? imageStatus.status : null
-
-  if (urlError) return <Alert severity="error">{urlError}</Alert>
-  if (imageState === 'error') {
-    return <Alert severity="error">This photo could not be displayed. Try again later.</Alert>
-  }
-
-  return (
-    <PhotoFrame>
-      {imageState !== 'loaded' ? (
-        <Stack sx={{ alignItems: 'center', py: 4 }}>
-          <CircularProgress aria-label="Loading photo" />
-        </Stack>
-      ) : null}
-      {url ? (
-        <Box
-          component="img"
-          src={url}
-          alt={alt}
-          onLoad={() => setImageStatus({ url, status: 'loaded' })}
-          onError={() => setImageStatus({ url, status: 'error' })}
-          sx={{
-            display: imageState === 'loaded' ? 'block' : 'none',
-            maxWidth: '100%',
-            maxHeight: { xs: '40vh', md: '60vh' },
-            objectFit: 'contain',
-          }}
-        />
-      ) : null}
-    </PhotoFrame>
   )
 }
 
@@ -467,13 +385,4 @@ function SpeciesName({ species }) {
       ) : null}
     </>
   )
-}
-
-// Five decimal places is about a metre, as precise as a phone GPS fix
-function formatCoordinates(plant) {
-  return `${plant.latitude.toFixed(5)}, ${plant.longitude.toFixed(5)}`
-}
-
-function formatHeight(heightCm) {
-  return heightCm == null ? '—' : `${heightCm} cm`
 }
