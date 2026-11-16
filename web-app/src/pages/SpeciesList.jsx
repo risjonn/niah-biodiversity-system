@@ -5,7 +5,6 @@ import {
   Box,
   Button,
   Chip,
-  CircularProgress,
   MenuItem,
   Paper,
   Stack,
@@ -19,7 +18,9 @@ import {
   Typography,
 } from '@mui/material'
 import LocalFloristOutlinedIcon from '@mui/icons-material/LocalFloristOutlined'
+import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
+import TableSkeleton from '../components/TableSkeleton'
 import { useSpecies } from '../hooks/useSpecies'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import {
@@ -30,6 +31,15 @@ import {
 
 // Thumbnail width and height in px, 48 on the spacing scale
 const THUMBNAIL_SIZE = 48
+
+// The table's headings, shared with its loading skeleton
+const COLUMNS = [
+  { label: 'Photo', sx: { width: THUMBNAIL_SIZE } },
+  { label: 'Scientific name' },
+  { label: 'Common name' },
+  { label: 'Family' },
+  { label: 'Conservation status' },
+]
 
 export default function SpeciesList() {
   const { fetchSpecies } = useSpecies()
@@ -55,6 +65,7 @@ export default function SpeciesList() {
 
   const isLoading = result?.filtersKey !== filtersKey
   const count = !isLoading && !result.error ? result.data.length : null
+  const hasFilters = Boolean(search.trim() || conservationStatus)
 
   return (
     <Stack spacing={3}>
@@ -96,16 +107,29 @@ export default function SpeciesList() {
         </Stack>
       </Paper>
 
-      {isLoading ? (
-        <Stack sx={{ alignItems: 'center', py: 4 }}>
-          <CircularProgress aria-label="Loading species" />
-        </Stack>
-      ) : null}
+      {isLoading ? <TableSkeleton columns={COLUMNS} label="Loading species" /> : null}
       {!isLoading && result.error ? <Alert severity="error">{result.error}</Alert> : null}
       {!isLoading && !result.error && result.data.length === 0 ? (
-        <Typography variant="body1" color="text.secondary">
-          No species found
-        </Typography>
+        <EmptyState
+          message="No species found"
+          action={
+            hasFilters ? (
+              <Button
+                variant="outlined"
+                onClick={() => {
+                  setSearch('')
+                  setConservationStatus('')
+                }}
+              >
+                Clear search and filter
+              </Button>
+            ) : (
+              <Button component={RouterLink} to="/species/new" variant="contained">
+                Add species
+              </Button>
+            )
+          }
+        />
       ) : null}
 
       {!isLoading && result.data.length > 0 ? (
@@ -113,11 +137,11 @@ export default function SpeciesList() {
           <Table>
             <TableHead>
               <TableRow>
-                <TableCell sx={{ width: THUMBNAIL_SIZE }}>Photo</TableCell>
-                <TableCell>Scientific name</TableCell>
-                <TableCell>Common name</TableCell>
-                <TableCell>Family</TableCell>
-                <TableCell>Conservation status</TableCell>
+                {COLUMNS.map((column) => (
+                  <TableCell key={column.label} sx={column.sx}>
+                    {column.label}
+                  </TableCell>
+                ))}
               </TableRow>
             </TableHead>
             <TableBody>

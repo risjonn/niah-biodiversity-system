@@ -13,6 +13,7 @@ import {
   Typography,
 } from '@mui/material'
 import PageHeader from '../components/PageHeader'
+import { useToast } from '../context/ToastContext'
 import { useSpecies } from '../hooks/useSpecies'
 import { conservationStatusLabels, conservationStatuses } from '../lib/conservationStatus'
 
@@ -85,6 +86,7 @@ function EditSpecies({ id }) {
 // The form itself. `species` is the record being edited, or null when adding one.
 function SpeciesFields({ species }) {
   const navigate = useNavigate()
+  const toast = useToast()
   const { createSpecies, updateSpecies, speciesPhotoError, uploadSpeciesPhoto, removeSpeciesPhoto } =
     useSpecies()
   const isEdit = Boolean(species)
@@ -184,6 +186,8 @@ function SpeciesFields({ species }) {
     // The old photo was replaced or removed and nothing points at it any more. Not awaited:
     // removeSpeciesPhoto never fails and leaving the page doesn't stop it.
     if (currentPhotoUrl && currentPhotoUrl !== photoUrl) removeSpeciesPhoto(currentPhotoUrl)
+    // Shown on the species page, which the app-wide toast outlives the navigation to
+    toast.success(`${isEdit ? 'Saved' : 'Added'} ${data.scientific_name}`)
     navigate(`/species/${data.id}`)
   }
 

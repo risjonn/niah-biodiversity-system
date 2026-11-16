@@ -23,7 +23,9 @@ import {
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
+import { useToast } from '../context/ToastContext'
 import { useSpecies } from '../hooks/useSpecies'
 import { usePlants } from '../hooks/usePlants'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
@@ -200,6 +202,7 @@ function SpeciesContent({ species, plants, plantsError, onRetry }) {
 // deleting when there are none
 function DeleteSpeciesDialog({ open, species, recordCount, onClose }) {
   const navigate = useNavigate()
+  const toast = useToast()
   const { deleteSpecies, removeSpeciesPhoto } = useSpecies()
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState(null)
@@ -222,6 +225,8 @@ function DeleteSpeciesDialog({ open, species, recordCount, onClose }) {
     }
     // Not awaited: removeSpeciesPhoto never fails and leaving the page doesn't stop it
     removeSpeciesPhoto(species.reference_photo_url)
+    // Shown on the species list, which the app-wide toast outlives the navigation to
+    toast.success(`Deleted ${species.scientific_name}`)
     // Replaced so Back doesn't return to the deleted species
     navigate('/species', { replace: true })
   }
@@ -386,9 +391,7 @@ function SpeciesRecords({ plants, error, onRetry }) {
             </Stack>
 
             {plants.length === 0 ? (
-              <Typography variant="body1" color="text.secondary">
-                No plant records for this species yet
-              </Typography>
+              <EmptyState message="No plant records for this species yet" dense />
             ) : (
               <TableContainer component={Paper} variant="outlined">
                 <Table size="small">

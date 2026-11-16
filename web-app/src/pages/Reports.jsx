@@ -3,13 +3,9 @@ import {
   Alert,
   Box,
   Button,
-  Card,
-  CardContent,
   Chip,
-  CircularProgress,
   Grid,
   Paper,
-  Snackbar,
   Stack,
   Table,
   TableBody,
@@ -20,7 +16,15 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import CancelOutlinedIcon from '@mui/icons-material/CancelOutlined'
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlined'
+import HourglassEmptyOutlinedIcon from '@mui/icons-material/HourglassEmptyOutlined'
+import ListAltOutlinedIcon from '@mui/icons-material/ListAltOutlined'
+import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
+import StatCard from '../components/StatCard'
+import TableSkeleton from '../components/TableSkeleton'
+import { useToast } from '../context/ToastContext'
 import { useReports } from '../hooks/useReports'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
 import {
@@ -34,11 +38,12 @@ import {
 
 const COUNT_KEYS = ['total_records', 'approved', 'pending_review', 'rejected']
 
+// Colours match the review status chips and charts
 const SUMMARY_CARDS = [
-  { key: 'total_records', label: 'Total records' },
-  { key: 'approved', label: 'Approved' },
-  { key: 'pending_review', label: 'Pending review' },
-  { key: 'rejected', label: 'Rejected' },
+  { key: 'total_records', label: 'Total records', icon: ListAltOutlinedIcon, color: 'primary' },
+  { key: 'approved', label: 'Approved', icon: CheckCircleOutlineIcon, color: 'success' },
+  { key: 'pending_review', label: 'Pending review', icon: HourglassEmptyOutlinedIcon, color: 'warning' },
+  { key: 'rejected', label: 'Rejected', icon: CancelOutlinedIcon, color: 'error' },
 ]
 
 // Page-only cell styling. The exports use each column's plain format() value instead.
@@ -69,8 +74,7 @@ export default function Reports() {
   // than showing the previous range's rows) until its own query for the current range is back
   const [results, setResults] = useState({})
   const [pdfBusy, setPdfBusy] = useState(false)
-  // The message stays set while the snackbar fades out, so only `open` is cleared on close
-  const [snackbar, setSnackbar] = useState({ open: false })
+  const toast = useToast()
 
   const rangeInvalid = Boolean(from && to && from > to)
   const rangeKey = `${from}|${to}`
@@ -112,20 +116,11 @@ export default function Reports() {
     setTo('')
   }
 
-  // A new key per message restarts the auto-hide timer when one message replaces another
-  function showSnackbar(severity, message) {
-    setSnackbar((current) => ({ open: true, severity, message, key: (current.key ?? 0) + 1 }))
-  }
-
-  function closeSnackbar() {
-    setSnackbar((current) => ({ ...current, open: false }))
-  }
-
   function handleExportCsv(report, rows) {
     try {
       downloadCsv(reportFilename(report.filePrefix, range, 'csv'), report.columns, rows)
     } catch {
-      showSnackbar('error', 'The CSV file could not be created. Try again.')
+      toast.error('The CSV file could not be created. Try again.')
     }
   }
 
@@ -140,7 +135,7 @@ export default function Reports() {
       })
     } catch {
       // Also covers the PDF library failing to load, e.g. when the connection drops
-      showSnackbar('error', 'The PDF report could not be created. Try again.')
+      toast.error('The PDF report could not be created. Try again.')
     } finally {
       setPdfBusy(false)
     }
@@ -206,22 +201,13 @@ export default function Reports() {
           <Grid container spacing={2}>
             {SUMMARY_CARDS.map((card) => (
               <Grid key={card.key} size={{ xs: 12, sm: 6, md: 3 }}>
-                <Card variant="outlined" sx={{ height: '100%' }}>
-                  <CardContent>
-                    <Stack spacing={1}>
-                      <Typography variant="h3" component="h2">
-                        {card.label}
-                      </Typography>
-                      {!species ? (
-                        <CircularProgress size={24} aria-label={`Loading ${card.label}`} />
-                      ) : (
-                        <Typography variant="h1" component="p">
-                          {totals ? totals[card.key].toLocaleString() : '—'}
-                        </Typography>
-                      )}
-                    </Stack>
-                  </CardContent>
-                </Card>
+                <StatCard
+                  icon={card.icon}
+                  color={card.color}
+                  label={card.label}
+                  loading={!species}
+                  value={totals ? totals[card.key].toLocaleString() : '—'}
+                />
               </Grid>
             ))}
           </Grid>
@@ -249,23 +235,6 @@ export default function Reports() {
         </>
       )}
 
-      <Snackbar
-        key={snackbar.key}
-        open={snackbar.open}
-        autoHideDuration={5000}
-        onClose={(_event, reason) => {
-          if (reason !== 'clickaway') closeSnackbar()
-        }}
-      >
-        <Alert
-          severity={snackbar.severity}
-          variant="filled"
-          onClose={closeSnackbar}
-          sx={{ width: '100%' }}
-        >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
     </Stack>
   )
 }
@@ -292,15 +261,17 @@ function ReportSection({ report, result, emptyText, renderers = {}, totalsRow, o
         </Stack>
 
         {!result ? (
-          <Stack sx={{ alignItems: 'center', py: 4 }}>
-            <CircularProgress aria-label={`Loading ${report.title.toLowerCase()}`} />
-          </Stack>
+          <TableSkeleton
+            columns={columns.map((column) => column.label)}
+            label={`Loading ${report.title.toLowerCase()}`}
+            size="small"
+            rows={3}
+            outlined={false}
+          />
         ) : null}
         {result?.error ? <Alert severity="error">{result.error}</Alert> : null}
         {result && !result.error && rows.length === 0 ? (
-          <Typography variant="body1" color="text.secondary">
-            {emptyText}
-          </Typography>
+          <EmptyState message={emptyText} dense />
         ) : null}
 
         {canExport ? (

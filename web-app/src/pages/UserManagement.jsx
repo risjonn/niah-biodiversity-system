@@ -3,14 +3,12 @@ import {
   Alert,
   Button,
   Chip,
-  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   MenuItem,
   Paper,
-  Snackbar,
   Stack,
   Table,
   TableBody,
@@ -21,10 +19,16 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
+import TableSkeleton from '../components/TableSkeleton'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
 import { useUsers, userRoleLabels, userRoles } from '../hooks/useUsers'
 import { formatDate } from '../lib/formatDateTime'
+
+// The table's headings, shared with its loading skeleton
+const COLUMNS = ['Name', 'Email', 'Role', 'Created']
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -37,8 +41,7 @@ export default function UserManagement() {
   const [createOpen, setCreateOpen] = useState(false)
   // { email, password } of the account just created, shown once for the admin to pass on
   const [tempPassword, setTempPassword] = useState(null)
-  // The message stays set while the snackbar fades out, so only `open` is cleared on close
-  const [snackbar, setSnackbar] = useState({ open: false })
+  const toast = useToast()
 
   useEffect(() => {
     let cancelled = false
@@ -52,15 +55,6 @@ export default function UserManagement() {
 
   const users = result?.data ?? []
 
-  // A new key per message restarts the auto-hide timer when one message replaces another
-  function showSnackbar(severity, message) {
-    setSnackbar((current) => ({ open: true, severity, message, key: (current.key ?? 0) + 1 }))
-  }
-
-  function closeSnackbar() {
-    setSnackbar((current) => ({ ...current, open: false }))
-  }
-
   async function handleRoleChange(user, role) {
     if (busyIds.has(user.id) || role === user.role) return
 
@@ -73,14 +67,14 @@ export default function UserManagement() {
     })
 
     if (error) {
-      showSnackbar('error', error)
+      toast.error(error)
       return
     }
     setResult((current) => ({
       ...current,
       data: current.data.map((item) => (item.id === user.id ? data : item)),
     }))
-    showSnackbar('success', `${user.full_name} is now ${userRoleLabels[role]}`)
+    toast.success(`${user.full_name} is now ${userRoleLabels[role]}`)
   }
 
   // Resolves to an error message, or null once the account is created and the dialog can close
@@ -90,7 +84,7 @@ export default function UserManagement() {
 
     setResult((current) => ({ ...current, data: [...(current?.data ?? []), data.user] }))
     setTempPassword({ email: data.user.email ?? values.email, password: data.tempPassword })
-    showSnackbar('success', `Created account for ${data.user.full_name ?? values.fullName}`)
+    toast.success(`Created account for ${data.user.full_name ?? values.fullName}`)
     return null
   }
 
@@ -112,16 +106,17 @@ export default function UserManagement() {
         }
       />
 
-      {!result ? (
-        <Stack sx={{ alignItems: 'center', py: 4 }}>
-          <CircularProgress aria-label="Loading users" />
-        </Stack>
-      ) : null}
+      {!result ? <TableSkeleton columns={COLUMNS} label="Loading users" /> : null}
       {result?.error ? <Alert severity="error">{result.error}</Alert> : null}
       {result && !result.error && users.length === 0 ? (
-        <Typography variant="body1" color="text.secondary">
-          No users yet
-        </Typography>
+        <EmptyState
+          message="No users yet"
+          action={
+            <Button variant="contained" onClick={() => setCreateOpen(true)}>
+              Add user
+            </Button>
+          }
+        />
       ) : null}
 
       {users.length > 0 ? (
@@ -129,10 +124,9 @@ export default function UserManagement() {
           <Table>
             <TableHead>
               <TableRow>
-                <TableCell>Name</TableCell>
-                <TableCell>Email</TableCell>
-                <TableCell>Role</TableCell>
-                <TableCell>Created</TableCell>
+                {COLUMNS.map((column) => (
+                  <TableCell key={column}>{column}</TableCell>
+                ))}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -158,26 +152,8 @@ export default function UserManagement() {
       <TempPasswordDialog
         credentials={tempPassword}
         onClose={() => setTempPassword(null)}
-        onCopied={() => showSnackbar('success', 'Password copied')}
+        onCopied={() => toast.success('Password copied')}
       />
-
-      <Snackbar
-        key={snackbar.key}
-        open={snackbar.open}
-        autoHideDuration={5000}
-        onClose={(_event, reason) => {
-          if (reason !== 'clickaway') closeSnackbar()
-        }}
-      >
-        <Alert
-          severity={snackbar.severity}
-          variant="filled"
-          onClose={closeSnackbar}
-          sx={{ width: '100%' }}
-        >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
     </Stack>
   )
 }
