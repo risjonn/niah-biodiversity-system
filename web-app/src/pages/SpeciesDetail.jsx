@@ -11,6 +11,7 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  Link,
   Paper,
   Skeleton,
   Stack,
@@ -25,27 +26,17 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
+import PlantRecordPanel from '../components/PlantRecordPanel'
 import { useToast } from '../context/ToastContext'
 import { useSpecies } from '../hooks/useSpecies'
 import { usePlants } from '../hooks/usePlants'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
 import { formatDateTime } from '../lib/formatDateTime'
+import { reviewStatusChipColors, reviewStatusLabels } from '../lib/reviewStatus'
 
-// Matches the plant_review_status enum in database/schema/001_initial_schema.sql. Colours follow
-// docs/design-system.md: alert for waiting, success for approved, error for rejected.
+// The order the record counts are shown in on this page. Labels and colours are shared
+// (lib/reviewStatus.js).
 const REVIEW_STATUSES = ['pending_review', 'approved', 'rejected']
-
-const reviewStatusLabels = {
-  pending_review: 'Pending review',
-  approved: 'Approved',
-  rejected: 'Rejected',
-}
-
-const reviewStatusChipColors = {
-  pending_review: 'warning',
-  approved: 'success',
-  rejected: 'error',
-}
 
 // Editing happens on SpeciesForm (/species/:id/edit); deleting is confirmed in a dialog here
 export default function SpeciesDetail() {
@@ -352,6 +343,8 @@ function PhotoMessage({ children }) {
 }
 
 function SpeciesRecords({ plants, error, onRetry }) {
+  // The record open in the panel. This list only has a few columns, so the panel loads the rest.
+  const [openPlantId, setOpenPlantId] = useState(null)
   const counts = Object.fromEntries(
     REVIEW_STATUSES.map((status) => [
       status,
@@ -408,8 +401,25 @@ function SpeciesRecords({ plants, error, onRetry }) {
                   </TableHead>
                   <TableBody>
                     {plants.map((plant) => (
-                      <TableRow key={plant.id}>
-                        <TableCell sx={{ whiteSpace: 'nowrap' }}>{plant.qr_code}</TableCell>
+                      // The row opens the record's panel; the QR code is also a button, for the keyboard
+                      <TableRow
+                        key={plant.id}
+                        hover
+                        onClick={() => setOpenPlantId(plant.id)}
+                        sx={{ cursor: 'pointer' }}
+                      >
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          <Link
+                            component="button"
+                            variant="body2"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setOpenPlantId(plant.id)
+                            }}
+                          >
+                            {plant.qr_code}
+                          </Link>
+                        </TableCell>
                         <TableCell>
                           <Chip
                             size="small"
@@ -430,6 +440,7 @@ function SpeciesRecords({ plants, error, onRetry }) {
           </>
         )}
       </Stack>
+      <PlantRecordPanel plantId={openPlantId} onClose={() => setOpenPlantId(null)} />
     </Paper>
   )
 }

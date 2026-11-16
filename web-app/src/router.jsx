@@ -7,6 +7,7 @@ import Login from './pages/Login'
 // Lazy-loaded, see lazyPages.js
 import {
   Dashboard,
+  PlantRecords,
   PlantReview,
   Reports,
   SensorDashboard,
@@ -35,6 +36,7 @@ export const router = createBrowserRouter([
       { path: '/species/new', element: <SpeciesForm /> },
       { path: '/species/:id', element: <SpeciesDetail /> },
       { path: '/species/:id/edit', element: <SpeciesForm /> },
+      { path: '/records', element: <PlantRecords /> },
       { path: '/review', element: <PlantReview /> },
       { path: '/sensors', element: <SensorDashboard /> },
       { path: '/reports', element: <Reports /> },

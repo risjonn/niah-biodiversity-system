@@ -102,12 +102,74 @@ export function usePlants() {
   return {
     fetchPendingPlants,
     fetchApprovedPlants,
+    fetchPlantRecords,
     countPendingReviews,
     countApprovedPlants,
+    getPlantById,
     getPlantsBySpecies,
     getPlantPhotoUrl,
+    getPlantPhotoUrls,
     reviewPlant,
   }
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+// One page of every plant record (all statuses), newest first, for the plant records page.
+// Row-level security returns them all to conservation officers and admins. Filters:
+// - status: a review_status, or null for all
+// - speciesId: a species id, or null for all
+// - search: part of a QR code, any case
+// Resolves to { data: { rows, total }, error }, total being every match, not just this page.
+async function fetchPlantRecords({ status, speciesId, search, page = 0, pageSize = 25 } = {}) {
+  const from = page * pageSize
+  let query = supabase
+    .from('plants')
+    .select(PLANT_WITH_SPECIES, { count: 'exact' })
+    .order('recorded_at', { ascending: false })
+    // A tie-breaker, so records recorded at the same moment keep their place between pages
+    .order('id', { ascending: true })
+    .range(from, from + pageSize - 1)
+
+  if (status) query = query.eq('review_status', status)
+  if (speciesId) query = query.eq('species_id', speciesId)
+  const term = search?.trim()
+  // % and _ are LIKE wildcards, so they are escaped to match literally
+  if (term) query = query.ilike('qr_code', `%${term.replace(/[\\%_]/g, '\\$&')}%`)
+
+  const { data, error, count } = await query
+  if (error) return { data: { rows: [], total: 0 }, error: plantErrorMessage(error) }
+  return { data: { rows: data, total: count ?? data.length }, error: null }
+}
+
+// One record with its species, or data: null with no error when there is none with that id
+async function getPlantById(id) {
+  if (!UUID_PATTERN.test(id ?? '')) return { data: null, error: null }
+  const { data, error } = await supabase
+    .from('plants')
+    .select(PLANT_WITH_SPECIES)
+    .eq('id', id)
+    .maybeSingle()
+  if (error) return { data: null, error: plantErrorMessage(error) }
+  return { data, error: null }
+}
+
+// Signed URLs for several photos in one request, for a page of thumbnails. Resolves to
+// { data: { [path]: signedUrl }, error }; a path storage couldn't sign is left out.
+async function getPlantPhotoUrls(paths) {
+  const unique = [...new Set(paths.filter(Boolean))]
+  if (unique.length === 0) return { data: {}, error: null }
+
+  const { data, error } = await supabase.storage
+    .from(PHOTO_BUCKET)
+    .createSignedUrls(unique, PHOTO_URL_LIFETIME_SECONDS)
+
+  if (error) return { data: {}, error: photoErrorMessage(error) }
+  const urls = {}
+  for (const item of data ?? []) {
+    if (item.signedUrl && !item.error) urls[item.path] = item.signedUrl
+  }
+  return { data: urls, error: null }
 }
 
 // Plant photos are in a private bucket (database/schema/006_plant_photos_storage.sql) and
