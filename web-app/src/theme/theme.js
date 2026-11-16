@@ -18,8 +18,12 @@ export const tokens = {
   criticallyEndangered: '#751E26',
 }
 
-// Fills in the light, dark and contrastText shades MUI needs for a custom palette colour
-const { augmentColor } = createTheme().palette
+// Fills in the light, dark and contrastText shades MUI needs for a custom palette colour.
+// The default breakpoints are the ones this theme uses, for responsive type below.
+const {
+  palette: { augmentColor },
+  breakpoints,
+} = createTheme()
 
 export const theme = createTheme({
   palette: {
@@ -42,6 +46,14 @@ export const theme = createTheme({
   },
   typography: {
     fontFamily: 'Inter, sans-serif',
+    // Hero headings only (the landing page title). Not mapped to an element, so pass
+    // component="h1" with it. Smaller below md so it fits on phones and tablets.
+    display: {
+      fontSize: 32,
+      fontWeight: 600,
+      lineHeight: 1.2,
+      [breakpoints.up('md')]: { fontSize: 40 },
+    },
     h1: { fontSize: 28, fontWeight: 600 },
     h2: { fontSize: 22, fontWeight: 600 },
     h3: { fontSize: 18, fontWeight: 500 },
