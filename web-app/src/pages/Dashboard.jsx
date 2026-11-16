@@ -1,15 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link as RouterLink } from 'react-router-dom'
-import {
-  Alert,
-  Card,
-  CardActionArea,
-  CardContent,
-  CircularProgress,
-  Grid,
-  Stack,
-  Typography,
-} from '@mui/material'
+import { Grid, Stack } from '@mui/material'
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlined'
+import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined'
+import LocalFloristOutlinedIcon from '@mui/icons-material/LocalFloristOutlined'
+import NotificationsActiveOutlinedIcon from '@mui/icons-material/NotificationsActiveOutlined'
 import {
   Bar,
   BarChart,
@@ -24,6 +18,7 @@ import {
 } from 'recharts'
 import PageHeader from '../components/PageHeader'
 import ChartCard from '../components/ChartCard'
+import StatCard from '../components/StatCard'
 import { useAuth } from '../context/AuthContext'
 import { usePlants } from '../hooks/usePlants'
 import { useReports } from '../hooks/useReports'
@@ -120,24 +115,32 @@ export default function Dashboard() {
           title="Pending reviews for you"
           caption="Records by other people"
           to="/review"
+          icon={FactCheckOutlinedIcon}
+          color="warning"
           loadCount={countPendingReviews}
         />
         <CountCard
           title="Approved plants"
           caption="Visible to the public"
           to="/species"
+          icon={CheckCircleOutlineIcon}
+          color="success"
           loadCount={countApprovedPlants}
         />
         <CountCard
           title="Species"
           caption="In the catalogue"
           to="/species"
+          icon={LocalFloristOutlinedIcon}
+          color="secondary"
           loadCount={countSpecies}
         />
         <CountCard
           title="Open alerts"
           caption="Not yet acknowledged"
           to="/sensors"
+          icon={NotificationsActiveOutlinedIcon}
+          color="error"
           loadCount={countOpenAlerts}
         />
       </Grid>
@@ -176,35 +179,22 @@ function useLoaded(load) {
   return result
 }
 
-// A clickable card showing one total
-function CountCard({ title, caption, to, loadCount }) {
+// A clickable card showing one total, loaded on its own
+function CountCard({ title, caption, to, icon, color, loadCount }) {
   const result = useLoaded(loadCount)
 
   return (
     <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-      <Card variant="outlined" sx={{ height: '100%' }}>
-        <CardActionArea component={RouterLink} to={to} sx={{ height: '100%' }}>
-          <CardContent sx={{ height: '100%' }}>
-            <Stack spacing={1}>
-              <Typography variant="h3" component="h2">
-                {title}
-              </Typography>
-              {!result ? <CircularProgress size={24} aria-label={`Loading ${title}`} /> : null}
-              {result?.error ? <Alert severity="error">{result.error}</Alert> : null}
-              {result && !result.error ? (
-                <Typography variant="h1" component="p">
-                  {formatCount(result.data)}
-                </Typography>
-              ) : null}
-              {caption ? (
-                <Typography variant="body2" color="text.secondary">
-                  {caption}
-                </Typography>
-              ) : null}
-            </Stack>
-          </CardContent>
-        </CardActionArea>
-      </Card>
+      <StatCard
+        icon={icon}
+        color={color}
+        label={title}
+        caption={caption}
+        to={to}
+        loading={!result}
+        error={result?.error ?? null}
+        value={result && !result.error ? formatCount(result.data) : null}
+      />
     </Grid>
   )
 }

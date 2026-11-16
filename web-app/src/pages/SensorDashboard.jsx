@@ -27,8 +27,12 @@ import {
   Typography,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
+import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
+import TableSkeleton from '../components/TableSkeleton'
 import { useAuth } from '../context/AuthContext'
+import { useNavCounts } from '../context/NavCountsContext'
+import { useToast } from '../context/ToastContext'
 import SensorCharts from '../components/SensorCharts'
 import { useSensors } from '../hooks/useSensors'
 import { formatDateTime, formatRelativeTime } from '../lib/formatDateTime'
@@ -40,6 +44,9 @@ import { LOW_BATTERY_PERCENT } from '../lib/sensorCharts'
 const REFRESH_INTERVAL_MS = 15 * 1000
 // A node the server hasn't heard from for this long is shown as offline
 const OFFLINE_AFTER_MS = 15 * 60 * 1000
+
+// The readings table's headings, shared with its loading skeleton
+const READING_COLUMNS = ['Recorded', 'Temperature', 'Humidity', 'Motion']
 
 // Matches the alert_type enum in database/schema/001_initial_schema.sql. Nothing raises
 // node_offline yet; offline status is worked out on this page from last_received_at.
@@ -61,6 +68,7 @@ const nodeStatusChipColors = { online: 'success', offline: 'warning', inactive: 
 // Officers and admins only, through ProtectedRoute in router.jsx
 export default function SensorDashboard() {
   const { getNodeStatus, getAlerts } = useSensors()
+  const { setOpenAlertsCount } = useNavCounts()
   // The last data that loaded successfully. Kept on screen when a later refresh fails.
   const [snapshot, setSnapshot] = useState(null)
   const [loadError, setLoadError] = useState(null)
@@ -95,9 +103,12 @@ export default function SensorDashboard() {
           acknowledgedAlerts: acknowledgedAlerts.data,
           loadedAt: Date.now(),
         })
+        // The sidebar badge comes from this same list (open alerts aren't capped, so its length
+        // is the total), so they always match: on every auto refresh, Refresh and acknowledge
+        setOpenAlertsCount(openAlerts.data.length)
       }
     })
-  }, [getNodeStatus, getAlerts])
+  }, [getNodeStatus, getAlerts, setOpenAlertsCount])
 
   // Loads straight away, then every REFRESH_INTERVAL_MS while the tab is visible. Coming back to
   // the tab loads at once, since the data may be well out of date by then.
@@ -254,6 +265,7 @@ function SummaryCard({ title, value, detail, detailColor = 'text.secondary' }) {
 function AlertsSection({ openAlerts, acknowledgedAlerts, now, onChanged }) {
   const { user } = useAuth()
   const { acknowledgeAlert } = useSensors()
+  const toast = useToast()
   const [tab, setTab] = useState('open')
   // Ids of alerts being acknowledged, so each button is disabled until its alert leaves the list
   const [savingIds, setSavingIds] = useState(() => new Set())
@@ -263,9 +275,11 @@ function AlertsSection({ openAlerts, acknowledgedAlerts, now, onChanged }) {
     setSavingIds((current) => new Set(current).add(id))
     setError(null)
     const result = await acknowledgeAlert(id)
+    // The error stays inline above the list; a success gets a toast
     if (result.error) setError(result.error)
+    else toast.success('Alert acknowledged')
     // Reloaded either way: a success moves the alert to the acknowledged list, and "already
-    // acknowledged" means the list is out of date
+    // acknowledged" means the list is out of date. The reload also updates the sidebar badge.
     await onChanged()
     setSavingIds((current) => {
       const next = new Set(current)
@@ -297,9 +311,10 @@ function AlertsSection({ openAlerts, acknowledgedAlerts, now, onChanged }) {
         ) : null}
 
         {alerts.length === 0 ? (
-          <Typography variant="body1" color="text.secondary">
-            {tab === 'open' ? 'No open alerts' : 'No acknowledged alerts yet'}
-          </Typography>
+          <EmptyState
+            message={tab === 'open' ? 'No open alerts' : 'No acknowledged alerts yet'}
+            dense
+          />
         ) : (
           <Stack spacing={1}>
             {alerts.map((alert) => (
@@ -390,9 +405,7 @@ function NodesSection({ nodes, now }) {
       <Stack spacing={2}>
         <Typography variant="h2">Nodes</Typography>
         {nodes.length === 0 ? (
-          <Typography variant="body1" color="text.secondary">
-            No sensor nodes yet
-          </Typography>
+          <EmptyState message="No sensor nodes yet" dense />
         ) : (
           <>
             <Typography variant="body2" color="text.secondary">
@@ -530,9 +543,7 @@ function ReadingsDialog({ node, onClose }) {
       <DialogTitle>Latest readings from {node.node_identifier}</DialogTitle>
       <DialogContent>
         {isLoading ? (
-          <Stack sx={{ alignItems: 'center', py: 4 }}>
-            <CircularProgress aria-label="Loading readings" />
-          </Stack>
+          <TableSkeleton columns={READING_COLUMNS} label="Loading readings" size="small" />
         ) : null}
 
         {!isLoading && result.error ? (
@@ -553,9 +564,7 @@ function ReadingsDialog({ node, onClose }) {
         ) : null}
 
         {!isLoading && !result.error && result.data.length === 0 ? (
-          <Typography variant="body1" color="text.secondary">
-            No readings from this node yet
-          </Typography>
+          <EmptyState message="No readings from this node yet" dense />
         ) : null}
 
         {!isLoading && !result.error && result.data.length > 0 ? (
@@ -563,10 +572,9 @@ function ReadingsDialog({ node, onClose }) {
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell>Recorded</TableCell>
-                  <TableCell>Temperature</TableCell>
-                  <TableCell>Humidity</TableCell>
-                  <TableCell>Motion</TableCell>
+                  {READING_COLUMNS.map((column) => (
+                    <TableCell key={column}>{column}</TableCell>
+                  ))}
                 </TableRow>
               </TableHead>
               <TableBody>

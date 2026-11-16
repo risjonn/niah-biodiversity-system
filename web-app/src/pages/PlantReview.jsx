@@ -11,7 +11,6 @@ import {
   DialogTitle,
   Link,
   Paper,
-  Snackbar,
   Stack,
   Table,
   TableBody,
@@ -23,7 +22,11 @@ import {
   Typography,
 } from '@mui/material'
 import ImageNotSupportedOutlinedIcon from '@mui/icons-material/ImageNotSupportedOutlined'
+import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
+import TableSkeleton from '../components/TableSkeleton'
+import { useNavCounts } from '../context/NavCountsContext'
+import { useToast } from '../context/ToastContext'
 import { usePlants } from '../hooks/usePlants'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
 import { formatDateTime } from '../lib/formatDateTime'
@@ -32,16 +35,26 @@ import { mapUrl } from '../lib/mapUrl'
 // Hidden at tablet width and below, where the table runs out of room
 const HEIGHT_COLUMN_SX = { display: { xs: 'none', lg: 'table-cell' } }
 
+// The table's headings, shared with its loading skeleton
+const COLUMNS = [
+  'QR code',
+  'Species',
+  'Recorded',
+  'Location',
+  { label: 'Height', sx: HEIGHT_COLUMN_SX },
+  'Actions',
+]
+
 export default function PlantReview() {
   const { fetchPendingPlants, reviewPlant } = usePlants()
+  const toast = useToast()
+  const { refreshCounts } = useNavCounts()
   const [result, setResult] = useState(null)
   // Ids of records with a review request running, so their buttons can't be pressed twice
   const [busyIds, setBusyIds] = useState(() => new Set())
   // Dialogs hold an id rather than the record, so they close by themselves once it is reviewed
   const [detailId, setDetailId] = useState(null)
   const [rejectId, setRejectId] = useState(null)
-  // The message stays set while the snackbar fades out, so only `open` is cleared on close
-  const [snackbar, setSnackbar] = useState({ open: false })
 
   useEffect(() => {
     let cancelled = false
@@ -71,24 +84,17 @@ export default function PlantReview() {
     })
 
     if (error) {
-      showSnackbar('error', error)
+      toast.error(error)
       return false
     }
     setResult((current) => ({
       ...current,
       data: current.data.filter((pending) => pending.id !== plant.id),
     }))
-    showSnackbar('success', `${status === 'approved' ? 'Approved' : 'Rejected'} ${plant.qr_code}`)
+    toast.success(`${status === 'approved' ? 'Approved' : 'Rejected'} ${plant.qr_code}`)
+    // One fewer pending review on the sidebar badge
+    refreshCounts()
     return true
-  }
-
-  // A new key per message restarts the auto-hide timer when one message replaces another
-  function showSnackbar(severity, message) {
-    setSnackbar((current) => ({ open: true, severity, message, key: (current.key ?? 0) + 1 }))
-  }
-
-  function closeSnackbar() {
-    setSnackbar((current) => ({ ...current, open: false }))
   }
 
   async function handleConfirmReject(reason) {
@@ -97,7 +103,8 @@ export default function PlantReview() {
 
   return (
     <Stack spacing={3}>
-      <Stack spacing={1}>
+      {/* The note sits right under the subtitle, with the same spacing as title to subtitle */}
+      <Stack spacing={0.5}>
         <PageHeader
           title="Plant review"
           subtitle={
@@ -113,16 +120,10 @@ export default function PlantReview() {
         </Typography>
       </Stack>
 
-      {!result ? (
-        <Stack sx={{ alignItems: 'center', py: 4 }}>
-          <CircularProgress aria-label="Loading records" />
-        </Stack>
-      ) : null}
+      {!result ? <TableSkeleton columns={COLUMNS} label="Loading records" /> : null}
       {result?.error ? <Alert severity="error">{result.error}</Alert> : null}
       {result && !result.error && plants.length === 0 ? (
-        <Typography variant="body1" color="text.secondary">
-          Nothing waiting for review
-        </Typography>
+        <EmptyState message="Nothing waiting for review" />
       ) : null}
 
       {plants.length > 0 ? (
@@ -130,12 +131,15 @@ export default function PlantReview() {
           <Table>
             <TableHead>
               <TableRow>
-                <TableCell>QR code</TableCell>
-                <TableCell>Species</TableCell>
-                <TableCell>Recorded</TableCell>
-                <TableCell>Location</TableCell>
-                <TableCell sx={HEIGHT_COLUMN_SX}>Height</TableCell>
-                <TableCell>Actions</TableCell>
+                {COLUMNS.map((column) =>
+                  typeof column === 'string' ? (
+                    <TableCell key={column}>{column}</TableCell>
+                  ) : (
+                    <TableCell key={column.label} sx={column.sx}>
+                      {column.label}
+                    </TableCell>
+                  ),
+                )}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -168,24 +172,6 @@ export default function PlantReview() {
         onConfirm={handleConfirmReject}
         onClose={() => setRejectId(null)}
       />
-
-      <Snackbar
-        key={snackbar.key}
-        open={snackbar.open}
-        autoHideDuration={5000}
-        onClose={(_event, reason) => {
-          if (reason !== 'clickaway') closeSnackbar()
-        }}
-      >
-        <Alert
-          severity={snackbar.severity}
-          variant="filled"
-          onClose={closeSnackbar}
-          sx={{ width: '100%' }}
-        >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
     </Stack>
   )
 }
