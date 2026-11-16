@@ -65,6 +65,25 @@ export function usePlants() {
     [userId],
   )
 
+  // The signed-in user's review queue, oldest first. Row-level security returns every pending
+  // record to conservation officers and admins, but their own are left out: nobody can review a
+  // record they recorded (database/schema/004 and 015). Same filter as countPendingReviews, so
+  // the dashboard total matches this list.
+  const fetchPendingPlants = useCallback(async () => {
+    if (!userId) {
+      return { data: [], error: 'You need to be signed in to review plant records.' }
+    }
+    const { data, error } = await supabase
+      .from('plants')
+      .select(PLANT_WITH_SPECIES)
+      .eq('review_status', 'pending_review')
+      .neq('recorded_by', userId)
+      .order('recorded_at', { ascending: true })
+
+    if (error) return { data: [], error: plantErrorMessage(error) }
+    return { data, error: null }
+  }, [userId])
+
   // How many pending records the signed-in user can review. Their own records are left out,
   // because nobody can review a record they recorded (database/schema/004 and 015).
   const countPendingReviews = useCallback(() => {
@@ -113,19 +132,6 @@ function countApprovedPlants() {
   )
 }
 
-// The review queue, oldest first. Row-level security returns every pending record to conservation
-// officers and admins, including ones they recorded themselves. Those stay in the list, but
-// database/schema/004 and 015 stop anyone reviewing their own record.
-async function fetchPendingPlants() {
-  const { data, error } = await supabase
-    .from('plants')
-    .select(PLANT_WITH_SPECIES)
-    .eq('review_status', 'pending_review')
-    .order('recorded_at', { ascending: true })
-
-  if (error) return { data: [], error: plantErrorMessage(error) }
-  return { data, error: null }
-}
 
 // Approved records, newest first. These are public. `search` matches the QR code, location
 // description or notes; `speciesId` limits the results to one species.

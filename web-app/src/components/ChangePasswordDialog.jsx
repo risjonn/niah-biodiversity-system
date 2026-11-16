@@ -7,8 +7,8 @@ import {
   DialogContent,
   DialogTitle,
   Stack,
-  TextField,
 } from '@mui/material'
+import PasswordField from './PasswordField'
 import { useAuth } from '../context/AuthContext'
 
 const MIN_PASSWORD_LENGTH = 8
@@ -78,9 +78,8 @@ export default function ChangePasswordDialog({ onChanged, onClose }) {
       <DialogTitle>Change password</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
-          <TextField
+          <PasswordField
             label="Current password"
-            type="password"
             autoComplete="current-password"
             value={form.current}
             onChange={setField('current')}
@@ -90,9 +89,8 @@ export default function ChangePasswordDialog({ onChanged, onClose }) {
             inputRef={currentRef}
             fullWidth
           />
-          <TextField
+          <PasswordField
             label="New password"
-            type="password"
             autoComplete="new-password"
             value={form.next}
             onChange={setField('next')}
@@ -101,9 +99,8 @@ export default function ChangePasswordDialog({ onChanged, onClose }) {
             disabled={busy}
             fullWidth
           />
-          <TextField
+          <PasswordField
             label="Confirm new password"
-            type="password"
             autoComplete="new-password"
             value={form.confirm}
             onChange={setField('confirm')}

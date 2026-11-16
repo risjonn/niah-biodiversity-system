@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Alert,
   Button,
+  Chip,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -184,34 +185,32 @@ export default function UserManagement() {
 function UserRow({ user, isSelf, busy, onRoleChange }) {
   return (
     <TableRow>
-      <TableCell>
-        {user.full_name}
-        {isSelf ? (
-          <Typography variant="caption" component="span" color="text.secondary">
-            {' '}
-            (you)
-          </Typography>
-        ) : null}
-      </TableCell>
+      <TableCell>{user.full_name}</TableCell>
       <TableCell>{user.email}</TableCell>
       <TableCell>
-        {/* You can't change your own role, so the last admin can't lock everyone out */}
-        <TextField
-          select
-          size="small"
-          value={user.role ?? ''}
-          onChange={(event) => onRoleChange(event.target.value)}
-          disabled={busy || isSelf}
-          helperText={isSelf ? "You can't change your own role" : undefined}
-          slotProps={{ htmlInput: { 'aria-label': `Role for ${user.full_name}` } }}
-          sx={{ minWidth: 160 }}
-        >
-          {userRoles.map((role) => (
-            <MenuItem key={role} value={role}>
-              {userRoleLabels[role]}
-            </MenuItem>
-          ))}
-        </TextField>
+        {/* You can't change your own role, so the last admin can't lock everyone out. Your row
+            shows the role as plain text instead of a dropdown. */}
+        {isSelf ? (
+          <Chip size="small" label={`${userRoleLabels[user.role] ?? user.role} (you)`} />
+        ) : (
+          <TextField
+            select
+            size="small"
+            value={user.role ?? ''}
+            onChange={(event) => onRoleChange(event.target.value)}
+            disabled={busy}
+            slotProps={{ htmlInput: { 'aria-label': `Role for ${user.full_name}` } }}
+            // The same width for every role, wide enough for the longest ("Conservation officer")
+            // so no label is cut off and the column doesn't shift with the label
+            sx={{ width: (theme) => theme.spacing(28) }}
+          >
+            {userRoles.map((role) => (
+              <MenuItem key={role} value={role}>
+                {userRoleLabels[role]}
+              </MenuItem>
+            ))}
+          </TextField>
+        )}
       </TableCell>
       <TableCell>{formatDate(user.created_at)}</TableCell>
     </TableRow>

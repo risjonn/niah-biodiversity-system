@@ -306,14 +306,18 @@ function ReportSection({ report, result, emptyText, renderers = {}, totalsRow, o
         {canExport ? (
           // Wide reports scroll sideways inside the section instead of stretching the page
           <TableContainer sx={{ overflowX: 'auto' }}>
-            <Table size="small">
+            {/* 8px side padding instead of 16px: with ten columns that is what lets the species
+                summary fit at 1280px */}
+            <Table size="small" sx={{ '& .MuiTableCell-root': { px: 1 } }}>
               <TableHead>
                 <TableRow>
+                  {/* Long headings ("Conservation status") may wrap, so the species summary fits
+                      at 1280px without scrolling sideways. Dates and numbers stay on one line. */}
                   {columns.map((column) => (
                     <TableCell
                       key={column.key}
                       align={column.numeric ? 'right' : 'left'}
-                      sx={{ whiteSpace: 'nowrap' }}
+                      sx={{ verticalAlign: 'bottom' }}
                     >
                       {column.label}
                     </TableCell>
@@ -324,7 +328,11 @@ function ReportSection({ report, result, emptyText, renderers = {}, totalsRow, o
                 {rows.map((row, index) => (
                   <TableRow key={rowKey(row, index)}>
                     {columns.map((column) => (
-                      <TableCell key={column.key} align={column.numeric ? 'right' : 'left'}>
+                      <TableCell
+                        key={column.key}
+                        align={column.numeric ? 'right' : 'left'}
+                        sx={column.noWrap ? { whiteSpace: 'nowrap' } : undefined}
+                      >
                         {renderers[column.key]
                           ? renderers[column.key](row)
                           : displayValue((column.display ?? column.format)(row))}
