@@ -28,6 +28,7 @@ Font: **Inter**
 
 | Token         | Size | Weight | Use                          |
 |---------------|------|--------|------------------------------|
+| `display`     | 40px (32px below `md`) | 600 | Hero heading on the landing page only (web) |
 | `heading1`    | 28px | 600    | Page titles                  |
 | `heading2`    | 22px | 600    | Section headers              |
 | `heading3`    | 18px | 500    | Card/subsection titles       |
@@ -36,6 +37,10 @@ Font: **Inter**
 | `caption`     | 12px | 400    | Timestamps, hints, metadata  |
 
 Only weights 400, 500, and 600 are used, avoid 300 (light) and 700 (bold).
+
+`display` is web only for now. In MUI it is a custom Typography variant that isn't tied to an
+element, so give it one: `<Typography variant="display" component="h1">`. Keep `heading1` for
+page titles inside the app.
 
 ## Spacing
 
