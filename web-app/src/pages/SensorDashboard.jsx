@@ -32,6 +32,7 @@ import { useAuth } from '../context/AuthContext'
 import SensorCharts from '../components/SensorCharts'
 import { useSensors } from '../hooks/useSensors'
 import { formatDateTime, formatRelativeTime } from '../lib/formatDateTime'
+import { mapUrl } from '../lib/mapUrl'
 // Battery levels below this (in %) are shown in the error colour. Shared with the battery chart.
 import { LOW_BATTERY_PERCENT } from '../lib/sensorCharts'
 
@@ -444,7 +445,6 @@ function NodeRow({ node, now, onSelect }) {
   const status = nodeStatus(node, now)
   const hasReading = Boolean(node.reading_id)
   const battery = node.battery_level
-  const mapUrl = `https://www.google.com/maps?q=${node.latitude},${node.longitude}`
 
   return (
     <TableRow hover onClick={onSelect} sx={{ cursor: 'pointer', '& td': { whiteSpace: 'nowrap' } }}>
@@ -491,7 +491,7 @@ function NodeRow({ node, now, onSelect }) {
       <TableCell>
         {node.latitude.toFixed(5)}, {node.longitude.toFixed(5)}
         <Link
-          href={mapUrl}
+          href={mapUrl(node.latitude, node.longitude)}
           target="_blank"
           rel="noopener noreferrer"
           variant="body2"

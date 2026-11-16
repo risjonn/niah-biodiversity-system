@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
 import {
   Alert,
+  Box,
   Button,
   Chip,
   CircularProgress,
@@ -17,6 +18,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import LocalFloristOutlinedIcon from '@mui/icons-material/LocalFloristOutlined'
 import PageHeader from '../components/PageHeader'
 import { useSpecies } from '../hooks/useSpecies'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
@@ -25,6 +27,9 @@ import {
   conservationStatusLabels,
   conservationStatuses,
 } from '../lib/conservationStatus'
+
+// Thumbnail width and height in px, 48 on the spacing scale
+const THUMBNAIL_SIZE = 48
 
 export default function SpeciesList() {
   const { fetchSpecies } = useSpecies()
@@ -49,11 +54,14 @@ export default function SpeciesList() {
   }, [fetchSpecies, debouncedSearch, conservationStatus, filtersKey])
 
   const isLoading = result?.filtersKey !== filtersKey
+  const count = !isLoading && !result.error ? result.data.length : null
 
   return (
     <Stack spacing={3}>
       <PageHeader
         title="Species"
+        // How many match the current search and filter. "species" is the same in the plural.
+        subtitle={count == null ? null : `${count} species`}
         action={
           <Button component={RouterLink} to="/species/new" variant="contained">
             Add species
@@ -61,30 +69,32 @@ export default function SpeciesList() {
         }
       />
 
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-        <TextField
-          label="Search"
-          placeholder="Scientific name, common name or family"
-          type="search"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          sx={{ flex: { sm: 2 } }}
-        />
-        <TextField
-          select
-          label="Conservation status"
-          value={conservationStatus}
-          onChange={(event) => setConservationStatus(event.target.value)}
-          sx={{ flex: { sm: 1 } }}
-        >
-          <MenuItem value="">All statuses</MenuItem>
-          {conservationStatuses.map((status) => (
-            <MenuItem key={status} value={status}>
-              {conservationStatusLabels[status]}
-            </MenuItem>
-          ))}
-        </TextField>
-      </Stack>
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+          <TextField
+            label="Search"
+            placeholder="Scientific name, common name or family"
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            sx={{ flex: { sm: 2 } }}
+          />
+          <TextField
+            select
+            label="Conservation status"
+            value={conservationStatus}
+            onChange={(event) => setConservationStatus(event.target.value)}
+            sx={{ flex: { sm: 1 } }}
+          >
+            <MenuItem value="">All statuses</MenuItem>
+            {conservationStatuses.map((status) => (
+              <MenuItem key={status} value={status}>
+                {conservationStatusLabels[status]}
+              </MenuItem>
+            ))}
+          </TextField>
+        </Stack>
+      </Paper>
 
       {isLoading ? (
         <Stack sx={{ alignItems: 'center', py: 4 }}>
@@ -103,6 +113,7 @@ export default function SpeciesList() {
           <Table>
             <TableHead>
               <TableRow>
+                <TableCell sx={{ width: THUMBNAIL_SIZE }}>Photo</TableCell>
                 <TableCell>Scientific name</TableCell>
                 <TableCell>Common name</TableCell>
                 <TableCell>Family</TableCell>
@@ -140,6 +151,10 @@ function SpeciesRow({ species, onOpen }) {
       }}
       sx={{ cursor: 'pointer' }}
     >
+      <TableCell sx={{ py: 1 }}>
+        {/* Keyed by the URL so a changed photo gets a fresh load state */}
+        <Thumbnail key={species.reference_photo_url ?? ''} url={species.reference_photo_url} />
+      </TableCell>
       <TableCell>
         <Typography variant="body2" component="span" sx={{ fontStyle: 'italic' }}>
           {species.scientific_name}
@@ -151,5 +166,42 @@ function SpeciesRow({ species, onOpen }) {
         <Chip size="small" label={statusLabel} color={conservationStatusChipColor(status)} />
       </TableCell>
     </TableRow>
+  )
+}
+
+// The species' reference photo, the same public URL the species page shows. Decorative (the name
+// is in the next cell), so alt is empty. A leaf placeholder when there is no photo or it fails.
+function Thumbnail({ url }) {
+  const [failed, setFailed] = useState(false)
+  const frameSx = {
+    width: THUMBNAIL_SIZE,
+    height: THUMBNAIL_SIZE,
+    borderRadius: 1,
+    overflow: 'hidden',
+    bgcolor: 'background.default',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: 'text.secondary',
+  }
+
+  if (!url || failed) {
+    return (
+      <Box sx={frameSx}>
+        <LocalFloristOutlinedIcon fontSize="small" aria-hidden="true" />
+      </Box>
+    )
+  }
+  return (
+    <Box sx={frameSx}>
+      <Box
+        component="img"
+        src={url}
+        alt=""
+        loading="lazy"
+        onError={() => setFailed(true)}
+        sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+      />
+    </Box>
   )
 }

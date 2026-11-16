@@ -22,6 +22,7 @@ import {
   chartRanges,
   chartWindow,
   formatBucket,
+  formatEveryThirdSarawakHour,
   formatSarawakDay,
   formatSarawakHour,
   LOW_BATTERY_PERCENT,
@@ -289,11 +290,14 @@ function MeasurementChart({ title, unit, rows, charts, loading, error, limits, l
         <Legend {...legendProps} />
         {limits ? (
           <>
-            <ReferenceLine
-              y={Number(limits[1])}
-              {...limitLine}
-              label={limitLabel(`Max ${Number(limits[1])} ${unit}`, 'insideTopRight')}
-            />
+            {/* A max at the chart's ceiling (humidity at 100 %) can't be passed, so it isn't drawn */}
+            {max == null || Number(limits[1]) < max ? (
+              <ReferenceLine
+                y={Number(limits[1])}
+                {...limitLine}
+                label={limitLabel(`Max ${Number(limits[1])} ${unit}`, 'insideTopRight')}
+              />
+            ) : null}
             <ReferenceLine
               y={Number(limits[0])}
               {...limitLine}
@@ -363,7 +367,7 @@ function MotionChart({ charts, range, loading, error }) {
           tickLine={false}
           // 24 hourly bars are too many to label, so only every third hour is
           tickFormatter={(time) =>
-            isDays ? formatSarawakDay(time) : sarawakHourEvery3(time)
+            isDays ? formatSarawakDay(time) : formatEveryThirdSarawakHour(time)
           }
         />
         <YAxis tick={tick} stroke={chartTokens.axis} allowDecimals={false} width={40} />
@@ -390,11 +394,6 @@ function MotionChart({ charts, range, loading, error }) {
       </BarChart>
     </ChartCard>
   )
-}
-
-function sarawakHourEvery3(time) {
-  const label = formatSarawakHour(time)
-  return Number(label.slice(0, 2)) % 3 === 0 ? label : ''
 }
 
 // The latest battery level of each active node, from the page's node list

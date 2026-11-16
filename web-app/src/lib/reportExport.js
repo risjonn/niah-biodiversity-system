@@ -1,5 +1,5 @@
 import { conservationStatusLabels } from './conservationStatus'
-import { formatDateTime } from './formatDateTime'
+import { formatDate, formatDateTime } from './formatDateTime'
 import { tokens } from '../theme/theme'
 
 // Shared by the reports page and its CSV and PDF exports, so all three always show the same
@@ -58,13 +58,15 @@ function numberColumn(key, label) {
 }
 
 // format() is the export value ("16 Oct 2026, 14:30"). The page shows display() instead, in the
-// app's date format ("16 Oct 2026, 2:30 pm").
-function dateTimeColumn(key, label) {
+// app's date format: "16 Oct 2026, 2:30 pm", or "16 Oct 2026" with dateOnly to save width.
+function dateTimeColumn(key, label, { dateOnly = false } = {}) {
+  const formatForPage = dateOnly ? formatDate : formatDateTime
   return {
     key,
     label,
     format: (row) => formatKuchingDateTime(row[key]),
-    display: (row) => formatDateTime(row[key]),
+    display: (row) => formatForPage(row[key]),
+    noWrap: true,
   }
 }
 
@@ -85,8 +87,8 @@ export const speciesSummaryReport = {
     numberColumn('approved', 'Approved'),
     numberColumn('pending_review', 'Pending'),
     numberColumn('rejected', 'Rejected'),
-    dateTimeColumn('first_recorded_at', 'First recorded'),
-    dateTimeColumn('last_recorded_at', 'Last recorded'),
+    dateTimeColumn('first_recorded_at', 'First recorded', { dateOnly: true }),
+    dateTimeColumn('last_recorded_at', 'Last recorded', { dateOnly: true }),
   ],
 }
 

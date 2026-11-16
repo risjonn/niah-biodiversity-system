@@ -9,6 +9,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Link,
   Paper,
   Snackbar,
   Stack,
@@ -21,17 +22,17 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import ImageNotSupportedOutlinedIcon from '@mui/icons-material/ImageNotSupportedOutlined'
 import PageHeader from '../components/PageHeader'
-import { useAuth } from '../context/AuthContext'
 import { usePlants } from '../hooks/usePlants'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
 import { formatDateTime } from '../lib/formatDateTime'
+import { mapUrl } from '../lib/mapUrl'
 
-const OWN_RECORD_MESSAGE =
-  'You submitted this record, another officer or admin needs to review it.'
+// Hidden at tablet width and below, where the table runs out of room
+const HEIGHT_COLUMN_SX = { display: { xs: 'none', lg: 'table-cell' } }
 
 export default function PlantReview() {
-  const { user } = useAuth()
   const { fetchPendingPlants, reviewPlant } = usePlants()
   const [result, setResult] = useState(null)
   // Ids of records with a review request running, so their buttons can't be pressed twice
@@ -52,17 +53,14 @@ export default function PlantReview() {
     }
   }, [fetchPendingPlants])
 
+  // The user's own records aren't in the list at all (see fetchPendingPlants)
   const plants = result?.data ?? []
   const detailPlant = plants.find((plant) => plant.id === detailId) ?? null
   const rejectPlant = plants.find((plant) => plant.id === rejectId) ?? null
 
-  // Row-level security stops anyone reviewing their own record (004_prevent_self_review.sql), so
-  // the buttons are disabled up front. reviewPlant's error still covers anything else refused.
-  const isOwnRecord = (plant) => Boolean(user) && plant.recorded_by === user.id
-
   // Resolves to true once the record is reviewed and removed from the list
   async function handleReview(plant, status, rejectionReason) {
-    if (busyIds.has(plant.id) || isOwnRecord(plant)) return false
+    if (busyIds.has(plant.id)) return false
 
     setBusyIds((ids) => new Set(ids).add(plant.id))
     const { error } = await reviewPlant(plant.id, { status, rejectionReason })
@@ -97,27 +95,23 @@ export default function PlantReview() {
     if (await handleReview(rejectPlant, 'rejected', reason)) setRejectId(null)
   }
 
-  const actionsFor = (plant) => (
-    <ReviewActions
-      busy={busyIds.has(plant.id)}
-      isOwnRecord={isOwnRecord(plant)}
-      onApprove={() => handleReview(plant, 'approved')}
-      onReject={() => setRejectId(plant.id)}
-    />
-  )
-
   return (
     <Stack spacing={3}>
-      <PageHeader
-        title="Plant review"
-        subtitle={
-          result && !result.error
-            ? plants.length === 1
-              ? '1 record waiting for review'
-              : `${plants.length} records waiting for review`
-            : null
-        }
-      />
+      <Stack spacing={1}>
+        <PageHeader
+          title="Plant review"
+          subtitle={
+            result && !result.error
+              ? plants.length === 1
+                ? '1 record waiting for review'
+                : `${plants.length} records waiting for review`
+              : null
+          }
+        />
+        <Typography variant="body2" color="text.secondary">
+          Your own records are reviewed by another officer.
+        </Typography>
+      </Stack>
 
       {!result ? (
         <Stack sx={{ alignItems: 'center', py: 4 }}>
@@ -140,18 +134,13 @@ export default function PlantReview() {
                 <TableCell>Species</TableCell>
                 <TableCell>Recorded</TableCell>
                 <TableCell>Location</TableCell>
-                <TableCell>Height</TableCell>
+                <TableCell sx={HEIGHT_COLUMN_SX}>Height</TableCell>
                 <TableCell>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {plants.map((plant) => (
-                <PendingRow
-                  key={plant.id}
-                  plant={plant}
-                  onOpen={() => setDetailId(plant.id)}
-                  actions={actionsFor(plant)}
-                />
+                <PendingRow key={plant.id} plant={plant} onOpen={() => setDetailId(plant.id)} />
               ))}
             </TableBody>
           </Table>
@@ -160,8 +149,15 @@ export default function PlantReview() {
 
       <PlantDetailDialog
         plant={detailPlant}
-        isOwnRecord={detailPlant ? isOwnRecord(detailPlant) : false}
-        actions={detailPlant ? actionsFor(detailPlant) : null}
+        actions={
+          detailPlant ? (
+            <ReviewActions
+              busy={busyIds.has(detailPlant.id)}
+              onApprove={() => handleReview(detailPlant, 'approved')}
+              onReject={() => setRejectId(detailPlant.id)}
+            />
+          ) : null
+        }
         onClose={() => setDetailId(null)}
       />
       {/* Keyed by record so the reason box starts empty for each one */}
@@ -194,19 +190,11 @@ export default function PlantReview() {
   )
 }
 
-// The row opens the full record, by click or by Enter when focused with the keyboard. Clicks and
-// key presses on the action buttons are left to the buttons.
-function PendingRow({ plant, onOpen, actions }) {
+// A click anywhere on the row opens the record. The Review button does the same and is how
+// keyboard users open it. Approving and rejecting only happen inside the dialog.
+function PendingRow({ plant, onOpen }) {
   return (
-    <TableRow
-      hover
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' && event.target === event.currentTarget) onOpen()
-      }}
-      sx={{ cursor: 'pointer' }}
-    >
+    <TableRow hover onClick={onOpen} sx={{ cursor: 'pointer' }}>
       <TableCell>{plant.qr_code}</TableCell>
       <TableCell>
         <SpeciesName species={plant.species} />
@@ -219,87 +207,108 @@ function PendingRow({ plant, onOpen, actions }) {
             {plant.location_description}
           </Typography>
         ) : null}
+        <MapLink plant={plant} />
       </TableCell>
-      <TableCell>{formatHeight(plant.height_cm)}</TableCell>
-      <TableCell onClick={(event) => event.stopPropagation()} sx={{ cursor: 'default' }}>
-        {actions}
+      <TableCell sx={HEIGHT_COLUMN_SX}>{formatHeight(plant.height_cm)}</TableCell>
+      <TableCell>
+        <Button
+          variant="outlined"
+          onClick={(event) => {
+            // The row would open it too
+            event.stopPropagation()
+            onOpen()
+          }}
+        >
+          Review
+        </Button>
       </TableCell>
     </TableRow>
   )
 }
 
-function ReviewActions({ busy, isOwnRecord, onApprove, onReject }) {
+// Opens the record's coordinates in Google Maps in a new tab, like the sensor page
+function MapLink({ plant }) {
   return (
-    <Stack spacing={1}>
-      <Stack direction="row" spacing={1}>
-        <Button
-          variant="contained"
-          color="success"
-          loading={busy}
-          disabled={isOwnRecord}
-          onClick={onApprove}
-        >
-          Approve
-        </Button>
-        <Button
-          variant="outlined"
-          color="error"
-          disabled={busy || isOwnRecord}
-          onClick={onReject}
-        >
-          Reject
-        </Button>
-      </Stack>
-      {isOwnRecord ? (
-        <Typography variant="caption" color="text.secondary">
-          {OWN_RECORD_MESSAGE}
-        </Typography>
-      ) : null}
+    <Link
+      href={mapUrl(plant.latitude, plant.longitude)}
+      target="_blank"
+      rel="noopener noreferrer"
+      variant="body2"
+      // Following the link shouldn't also open the record
+      onClick={(event) => event.stopPropagation()}
+      sx={{ display: 'block' }}
+    >
+      Open in map
+    </Link>
+  )
+}
+
+function ReviewActions({ busy, onApprove, onReject }) {
+  return (
+    <Stack direction="row" spacing={1}>
+      <Button variant="contained" color="success" loading={busy} onClick={onApprove}>
+        Approve
+      </Button>
+      <Button variant="outlined" color="error" disabled={busy} onClick={onReject}>
+        Reject
+      </Button>
     </Stack>
   )
 }
 
-function PlantDetailDialog({ plant, isOwnRecord, actions, onClose }) {
+// Photo on the left and details on the right from md up, stacked below that
+function PlantDetailDialog({ plant, actions, onClose }) {
   return (
-    <Dialog open={Boolean(plant)} onClose={onClose} fullWidth maxWidth="sm">
+    <Dialog open={Boolean(plant)} onClose={onClose} fullWidth maxWidth="md">
       {plant ? (
         <>
           <DialogTitle>{plant.qr_code}</DialogTitle>
           <DialogContent dividers>
-            <Stack spacing={2}>
-              {plant.photo_url ? (
-                <PlantPhoto path={plant.photo_url} alt={`Photo of ${plant.qr_code}`} />
-              ) : null}
-              <DetailField label="Species">
-                <SpeciesName species={plant.species} />
-                {plant.species ? (
-                  <Chip
-                    size="small"
-                    label={
-                      conservationStatusLabels[plant.species.conservation_status] ??
-                      plant.species.conservation_status
-                    }
-                    color={conservationStatusChipColor(plant.species.conservation_status)}
-                    sx={{ mt: 1 }}
-                  />
-                ) : null}
-              </DetailField>
-              <DetailField label="Recorded">{formatDateTime(plant.recorded_at)}</DetailField>
-              <DetailField label="Synced">
-                {plant.synced_at ? formatDateTime(plant.synced_at) : '—'}
-              </DetailField>
-              <DetailField label="Recorded by">
-                {isOwnRecord ? 'You' : plant.recorded_by}
-              </DetailField>
-              <DetailField label="Coordinates">{formatCoordinates(plant)}</DetailField>
-              <DetailField label="Location description">
-                {plant.location_description || '—'}
-              </DetailField>
-              <DetailField label="Height">{formatHeight(plant.height_cm)}</DetailField>
-              <DetailField label="Monitored">{plant.is_monitored ? 'Yes' : 'No'}</DetailField>
-              <DetailField label="Morphological notes">
-                {plant.morphological_notes || '—'}
-              </DetailField>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={3}>
+              <Box sx={{ flex: { md: 1 }, minWidth: 0 }}>
+                {plant.photo_url ? (
+                  <PlantPhoto path={plant.photo_url} alt={`Photo of ${plant.qr_code}`} />
+                ) : (
+                  <PhotoFrame>
+                    <Stack spacing={1} sx={{ alignItems: 'center', color: 'text.secondary', py: 4 }}>
+                      <ImageNotSupportedOutlinedIcon aria-hidden="true" />
+                      <Typography variant="body2">No photo with this record</Typography>
+                    </Stack>
+                  </PhotoFrame>
+                )}
+              </Box>
+              <Stack spacing={2} sx={{ flex: { md: 1 }, minWidth: 0 }}>
+                <DetailField label="Species">
+                  <SpeciesName species={plant.species} />
+                  {plant.species ? (
+                    <Chip
+                      size="small"
+                      label={
+                        conservationStatusLabels[plant.species.conservation_status] ??
+                        plant.species.conservation_status
+                      }
+                      color={conservationStatusChipColor(plant.species.conservation_status)}
+                      sx={{ mt: 1 }}
+                    />
+                  ) : null}
+                </DetailField>
+                <DetailField label="Recorded">{formatDateTime(plant.recorded_at)}</DetailField>
+                <DetailField label="Synced">
+                  {plant.synced_at ? formatDateTime(plant.synced_at) : '—'}
+                </DetailField>
+                <DetailField label="Coordinates">
+                  {formatCoordinates(plant)}
+                  <MapLink plant={plant} />
+                </DetailField>
+                <DetailField label="Location description">
+                  {plant.location_description || '—'}
+                </DetailField>
+                <DetailField label="Height">{formatHeight(plant.height_cm)}</DetailField>
+                <DetailField label="Monitored">{plant.is_monitored ? 'Yes' : 'No'}</DetailField>
+                <DetailField label="Morphological notes">
+                  {plant.morphological_notes || '—'}
+                </DetailField>
+              </Stack>
             </Stack>
           </DialogContent>
           <DialogActions sx={{ px: 3, py: 2, justifyContent: 'space-between' }}>
@@ -312,8 +321,28 @@ function PlantDetailDialog({ plant, isOwnRecord, actions, onClose }) {
   )
 }
 
+// The grey box the photo (or its loading, error or missing state) sits in
+function PhotoFrame({ children }) {
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 1,
+        bgcolor: 'background.default',
+        overflow: 'hidden',
+      }}
+    >
+      {children}
+    </Box>
+  )
+}
+
 // photo_url is a path in the private plant-photos bucket, so the image is shown through a signed
-// URL. Loading lasts until both the URL and the image itself have arrived.
+// URL. Loading lasts until both the URL and the image itself have arrived. The whole photo is
+// always shown (contained, not cropped), no taller than the viewport allows, so the dialog
+// doesn't need scrolling to see it.
 function PlantPhoto({ path, alt }) {
   const { getPlantPhotoUrl } = usePlants()
   // Kept with the path it was loaded for, so a different record's photo never shows here
@@ -340,7 +369,7 @@ function PlantPhoto({ path, alt }) {
   }
 
   return (
-    <Box>
+    <PhotoFrame>
       {imageState !== 'loaded' ? (
         <Stack sx={{ alignItems: 'center', py: 4 }}>
           <CircularProgress aria-label="Loading photo" />
@@ -354,13 +383,14 @@ function PlantPhoto({ path, alt }) {
           onLoad={() => setImageStatus({ url, status: 'loaded' })}
           onError={() => setImageStatus({ url, status: 'error' })}
           sx={{
-            width: '100%',
-            borderRadius: 1,
             display: imageState === 'loaded' ? 'block' : 'none',
+            maxWidth: '100%',
+            maxHeight: { xs: '40vh', md: '60vh' },
+            objectFit: 'contain',
           }}
         />
       ) : null}
-    </Box>
+    </PhotoFrame>
   )
 }
 

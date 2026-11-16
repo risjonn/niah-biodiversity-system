@@ -12,6 +12,7 @@ import {
   Snackbar,
   Toolbar,
   Typography,
+  useMediaQuery,
 } from '@mui/material'
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown'
 import MenuIcon from '@mui/icons-material/Menu'
@@ -38,13 +39,22 @@ export default function AppLayout() {
   const [navAnchor, setNavAnchor] = useState(null)
   const [changePasswordOpen, setChangePasswordOpen] = useState(false)
   const [passwordChanged, setPasswordChanged] = useState(false)
+  // Below sm, Log out moves into the user menu so the bar fits on one line. Rendered (not just
+  // hidden with CSS) only where it applies, so keyboard focus never lands on a hidden item.
+  const isPhone = useMediaQuery((theme) => theme.breakpoints.down('sm'))
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       <AppBar position="static" color="primary" elevation={0}>
-        <Toolbar sx={{ gap: 2, flexWrap: 'wrap', py: 1 }}>
+        {/* One line on phones: the title and name shorten with "…" rather than wrapping */}
+        <Toolbar sx={{ gap: 2, flexWrap: { xs: 'nowrap', sm: 'wrap' }, py: 1 }}>
           {/* Below md the title takes the spare width, so the user menu stays on the right */}
-          <Typography variant="h3" component="div" sx={{ flexGrow: { xs: 1, md: 0 } }}>
+          <Typography
+            variant="h3"
+            component="div"
+            noWrap
+            sx={{ flexGrow: { xs: 1, md: 0 }, minWidth: 0 }}
+          >
             Niah Biodiversity
           </Typography>
           {/* Below md the links fold into a menu button, shown first in the bar */}
@@ -112,12 +122,13 @@ export default function AppLayout() {
             aria-expanded={menuAnchor ? 'true' : undefined}
             endIcon={<ArrowDropDownIcon />}
             onClick={(event) => setMenuAnchor(event.currentTarget)}
+            sx={{ minWidth: 0, flexShrink: 1 }}
           >
-            <Box component="span" sx={{ textAlign: 'right' }}>
-              <Typography variant="body2" component="span" sx={{ display: 'block' }}>
+            <Box component="span" sx={{ textAlign: 'right', minWidth: 0 }}>
+              <Typography variant="body2" component="span" noWrap sx={{ display: 'block' }}>
                 {fullName}
               </Typography>
-              <Typography variant="caption" component="span" sx={{ display: 'block' }}>
+              <Typography variant="caption" component="span" noWrap sx={{ display: 'block' }}>
                 {roleLabels[role]}
               </Typography>
             </Box>
@@ -139,10 +150,22 @@ export default function AppLayout() {
             >
               Change password
             </MenuItem>
+            {isPhone ? (
+              <MenuItem
+                onClick={() => {
+                  setMenuAnchor(null)
+                  signOut()
+                }}
+              >
+                Log out
+              </MenuItem>
+            ) : null}
           </Menu>
-          <Button color="inherit" variant="outlined" onClick={signOut}>
-            Log out
-          </Button>
+          {isPhone ? null : (
+            <Button color="inherit" variant="outlined" onClick={signOut}>
+              Log out
+            </Button>
+          )}
         </Toolbar>
       </AppBar>
       {/* lg on every page: no page sets its own width, so they all already used MUI's default */}

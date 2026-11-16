@@ -60,6 +60,13 @@ export function formatTime(value) {
   return parts ? timeText(parts) : null
 }
 
+// "2 pm", the hour on its own, or null for no value. For chart axes, where the minutes are
+// always :00.
+export function formatHour(value) {
+  const parts = partsOf(value)
+  return parts ? `${parts.hour % 12 || 12} ${parts.hour < 12 ? 'am' : 'pm'}` : null
+}
+
 const MINUTE_MS = 60 * 1000
 const HOUR_MS = 60 * MINUTE_MS
 const DAY_MS = 24 * HOUR_MS

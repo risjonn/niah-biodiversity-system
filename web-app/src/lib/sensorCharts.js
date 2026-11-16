@@ -1,7 +1,7 @@
 // Time windows, buckets and labels for the sensor charts (components/SensorCharts.jsx). Plain
 // functions with no React or theme imports. Every time is a millisecond timestamp.
 
-import { formatDate, formatDateTime, formatTime } from './formatDateTime'
+import { formatDate, formatDateTime, formatHour, formatTime } from './formatDateTime'
 
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
@@ -151,21 +151,20 @@ export function toMotionRows(rows, buckets, bucketMs, seriesByNode) {
   return chartRows
 }
 
-const sarawakTime = new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'Asia/Kuching',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-})
 const sarawakWeekdayDay = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Asia/Kuching',
   weekday: 'short',
   day: 'numeric',
 })
 
-// "14:00"
+// "2 pm", 12-hour like the tooltips
 export function formatSarawakHour(time) {
-  return sarawakTime.format(time)
+  return formatHour(time)
+}
+
+// "2 pm" on every third hour (midnight, 3 am, 6 am...) and '' between, for the 24 hourly bars
+export function formatEveryThirdSarawakHour(time) {
+  return sarawakHour(time) % 3 === 0 ? formatHour(time) : ''
 }
 
 // "Mon 9"
