@@ -21,9 +21,11 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import PageHeader from '../components/PageHeader'
 import { useAuth } from '../context/AuthContext'
 import { usePlants } from '../hooks/usePlants'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
+import { formatDateTime } from '../lib/formatDateTime'
 
 const OWN_RECORD_MESSAGE =
   'You submitted this record, another officer or admin needs to review it.'
@@ -106,16 +108,16 @@ export default function PlantReview() {
 
   return (
     <Stack spacing={3}>
-      <Stack spacing={0.5}>
-        <Typography variant="h1">Plant review</Typography>
-        {result && !result.error ? (
-          <Typography variant="body1" color="text.secondary">
-            {plants.length === 1
+      <PageHeader
+        title="Plant review"
+        subtitle={
+          result && !result.error
+            ? plants.length === 1
               ? '1 record waiting for review'
-              : `${plants.length} records waiting for review`}
-          </Typography>
-        ) : null}
-      </Stack>
+              : `${plants.length} records waiting for review`
+            : null
+        }
+      />
 
       {!result ? (
         <Stack sx={{ alignItems: 'center', py: 4 }}>
@@ -449,10 +451,6 @@ function SpeciesName({ species }) {
       ) : null}
     </>
   )
-}
-
-function formatDateTime(value) {
-  return new Date(value).toLocaleString()
 }
 
 // Five decimal places is about a metre, as precise as a phone GPS fix

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import {
   Alert,
@@ -6,6 +6,7 @@ import {
   Box,
   Button,
   Container,
+  IconButton,
   Menu,
   MenuItem,
   Snackbar,
@@ -13,7 +14,9 @@ import {
   Typography,
 } from '@mui/material'
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown'
+import MenuIcon from '@mui/icons-material/Menu'
 import ChangePasswordDialog from '../components/ChangePasswordDialog'
+import PageLoader from '../components/PageLoader'
 import { useAuth } from '../context/AuthContext'
 import { roleLabels } from '../lib/roles'
 
@@ -32,6 +35,7 @@ export default function AppLayout() {
   const { fullName, role, signOut } = useAuth()
   const links = NAV_LINKS.filter((link) => !link.adminOnly || role === 'admin')
   const [menuAnchor, setMenuAnchor] = useState(null)
+  const [navAnchor, setNavAnchor] = useState(null)
   const [changePasswordOpen, setChangePasswordOpen] = useState(false)
   const [passwordChanged, setPasswordChanged] = useState(false)
 
@@ -39,14 +43,29 @@ export default function AppLayout() {
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       <AppBar position="static" color="primary" elevation={0}>
         <Toolbar sx={{ gap: 2, flexWrap: 'wrap', py: 1 }}>
-          <Typography variant="h3" component="div">
+          {/* Below md the title takes the spare width, so the user menu stays on the right */}
+          <Typography variant="h3" component="div" sx={{ flexGrow: { xs: 1, md: 0 } }}>
             Niah Biodiversity
           </Typography>
+          {/* Below md the links fold into a menu button, shown first in the bar */}
           <Box
             component="nav"
             aria-label="Main"
-            sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, flexGrow: 1 }}
+            sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, flexGrow: { md: 1 }, order: { xs: -1, md: 0 } }}
           >
+            <IconButton
+              id="nav-menu-button"
+              color="inherit"
+              edge="start"
+              aria-label="Open navigation menu"
+              aria-haspopup="true"
+              aria-controls={navAnchor ? 'nav-menu' : undefined}
+              aria-expanded={navAnchor ? 'true' : undefined}
+              onClick={(event) => setNavAnchor(event.currentTarget)}
+              sx={{ display: { md: 'none' } }}
+            >
+              <MenuIcon />
+            </IconButton>
             {links.map((link) => (
               // NavLink adds the "active" class (and aria-current="page") on the current route
               <Button
@@ -54,12 +73,35 @@ export default function AppLayout() {
                 component={NavLink}
                 to={link.to}
                 color="inherit"
-                sx={{ '&.active, &.active:hover': { bgcolor: 'primary.dark' } }}
+                sx={{
+                  display: { xs: 'none', md: 'inline-flex' },
+                  '&.active, &.active:hover': { bgcolor: 'primary.dark' },
+                }}
               >
                 {link.label}
               </Button>
             ))}
           </Box>
+          <Menu
+            id="nav-menu"
+            anchorEl={navAnchor}
+            open={Boolean(navAnchor)}
+            onClose={() => setNavAnchor(null)}
+            slotProps={{ list: { 'aria-labelledby': 'nav-menu-button' } }}
+          >
+            {links.map((link) => (
+              <MenuItem
+                key={link.to}
+                component={NavLink}
+                to={link.to}
+                onClick={() => setNavAnchor(null)}
+                // Same "active" class as the desktop links, shown in the menu's selected style
+                sx={{ '&.active': { bgcolor: 'action.selected', fontWeight: 500 } }}
+              >
+                {link.label}
+              </MenuItem>
+            ))}
+          </Menu>
           {/* Spans, because a button can't contain block elements. The role is part of the button so
               it still has a label for an account with no name. */}
           <Button
@@ -103,8 +145,11 @@ export default function AppLayout() {
           </Button>
         </Toolbar>
       </AppBar>
-      <Container component="main" sx={{ py: 4 }}>
-        <Outlet />
+      {/* lg on every page: no page sets its own width, so they all already used MUI's default */}
+      <Container component="main" maxWidth="lg" sx={{ py: 4 }}>
+        <Suspense fallback={<PageLoader />}>
+          <Outlet />
+        </Suspense>
       </Container>
 
       {changePasswordOpen ? (

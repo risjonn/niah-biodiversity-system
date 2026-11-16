@@ -1,12 +1,63 @@
-// Day before month, e.g. "4 Oct 2026, 9:18 pm", whatever the browser's own locale is
+// Date display for the whole web app. Every time is shown in Sarawak time (Asia/Kuching), where
+// the plants and sensors are, so a record reads the same wherever the viewer's browser is.
+// CSV and PDF exports keep their own format, see formatKuchingDateTime in reportExport.js.
+
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+// Numeric parts only. The strings are put together below, so they don't depend on how a browser
+// spells or punctuates a locale (some give "Sept", "PM" or a different separator).
+const kuchingParts = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Kuching',
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  hourCycle: 'h23',
+})
+
+// The Sarawak date and time parts of `value` (a Date, timestamp or ISO string), or null when
+// there is no value or it isn't a valid date
+function partsOf(value) {
+  if (value == null) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const parts = Object.fromEntries(
+    kuchingParts.formatToParts(date).map((part) => [part.type, part.value]),
+  )
+  return {
+    day: Number(parts.day),
+    month: MONTH_NAMES[Number(parts.month) - 1],
+    year: parts.year,
+    hour: Number(parts.hour),
+    minute: parts.minute,
+  }
+}
+
+function dateText({ day, month, year }) {
+  return `${day} ${month} ${year}`
+}
+
+function timeText({ hour, minute }) {
+  return `${hour % 12 || 12}:${minute} ${hour < 12 ? 'am' : 'pm'}`
+}
+
+// "15 Oct 2026, 11:21 pm", or null for no value
 export function formatDateTime(value) {
-  return new Date(value).toLocaleString('en-MY', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+  const parts = partsOf(value)
+  return parts ? `${dateText(parts)}, ${timeText(parts)}` : null
+}
+
+// "15 Oct 2026", or null for no value
+export function formatDate(value) {
+  const parts = partsOf(value)
+  return parts ? dateText(parts) : null
+}
+
+// "11:21 pm", or null for no value. For the end of a time range whose start shows the date.
+export function formatTime(value) {
+  const parts = partsOf(value)
+  return parts ? timeText(parts) : null
 }
 
 const MINUTE_MS = 60 * 1000

@@ -4,14 +4,17 @@ import RoleHomeRedirect from './components/RoleHomeRedirect'
 import AuthLayout from './layouts/AuthLayout'
 import AppLayout from './layouts/AppLayout'
 import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
-import SpeciesList from './pages/SpeciesList'
-import SpeciesDetail from './pages/SpeciesDetail'
-import SpeciesForm from './pages/SpeciesForm'
-import PlantReview from './pages/PlantReview'
-import SensorDashboard from './pages/SensorDashboard'
-import Reports from './pages/Reports'
-import UserManagement from './pages/UserManagement'
+// Lazy-loaded, see lazyPages.js
+import {
+  Dashboard,
+  PlantReview,
+  Reports,
+  SensorDashboard,
+  SpeciesDetail,
+  SpeciesForm,
+  SpeciesList,
+  UserManagement,
+} from './lazyPages'
 
 export const router = createBrowserRouter([
   {

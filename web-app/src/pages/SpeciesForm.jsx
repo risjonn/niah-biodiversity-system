@@ -12,6 +12,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import PageHeader from '../components/PageHeader'
 import { useSpecies } from '../hooks/useSpecies'
 import { conservationStatusLabels, conservationStatuses } from '../lib/conservationStatus'
 
@@ -67,10 +68,10 @@ function EditSpecies({ id }) {
   if (!result.data) {
     return (
       <Stack spacing={1} sx={{ alignItems: 'flex-start' }}>
-        <Typography variant="h1">Species not found</Typography>
-        <Typography variant="body1" color="text.secondary">
-          This species may have been removed, or the link may be wrong.
-        </Typography>
+        <PageHeader
+          title="Species not found"
+          subtitle="This species may have been removed, or the link may be wrong."
+        />
         <Button component={RouterLink} to="/species">
           Back to species
         </Button>
@@ -188,7 +189,7 @@ function SpeciesFields({ species }) {
 
   return (
     <Stack spacing={3}>
-      <Typography variant="h1">{isEdit ? 'Edit species' : 'Add species'}</Typography>
+      <PageHeader title={isEdit ? 'Edit species' : 'Add species'} />
 
       <Paper variant="outlined" component="form" noValidate onSubmit={handleSubmit} sx={{ p: 3 }}>
         <Stack spacing={3}>

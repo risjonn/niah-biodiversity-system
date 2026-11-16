@@ -20,8 +20,10 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import PageHeader from '../components/PageHeader'
 import { useAuth } from '../context/AuthContext'
 import { useUsers, userRoleLabels, userRoles } from '../hooks/useUsers'
+import { formatDate } from '../lib/formatDateTime'
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -93,24 +95,21 @@ export default function UserManagement() {
 
   return (
     <Stack spacing={3}>
-      <Stack
-        direction="row"
-        spacing={2}
-        useFlexGap
-        sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}
-      >
-        <Stack spacing={0.5}>
-          <Typography variant="h1">Users</Typography>
-          {result && !result.error ? (
-            <Typography variant="body1" color="text.secondary">
-              {users.length === 1 ? '1 account' : `${users.length} accounts`}
-            </Typography>
-          ) : null}
-        </Stack>
-        <Button variant="contained" onClick={() => setCreateOpen(true)}>
-          Add user
-        </Button>
-      </Stack>
+      <PageHeader
+        title="Users"
+        subtitle={
+          result && !result.error
+            ? users.length === 1
+              ? '1 account'
+              : `${users.length} accounts`
+            : null
+        }
+        action={
+          <Button variant="contained" onClick={() => setCreateOpen(true)}>
+            Add user
+          </Button>
+        }
+      />
 
       {!result ? (
         <Stack sx={{ alignItems: 'center', py: 4 }}>
@@ -214,7 +213,7 @@ function UserRow({ user, isSelf, busy, onRoleChange }) {
           ))}
         </TextField>
       </TableCell>
-      <TableCell>{new Date(user.created_at).toLocaleDateString()}</TableCell>
+      <TableCell>{formatDate(user.created_at)}</TableCell>
     </TableRow>
   )
 }

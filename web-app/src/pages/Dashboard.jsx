@@ -22,6 +22,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import PageHeader from '../components/PageHeader'
 import ChartCard from '../components/ChartCard'
 import { useAuth } from '../context/AuthContext'
 import { usePlants } from '../hooks/usePlants'
@@ -109,12 +110,10 @@ export default function Dashboard() {
 
   return (
     <Stack spacing={4}>
-      <Stack spacing={0.5}>
-        <Typography variant="h1">{fullName ? `Welcome, ${fullName}` : 'Welcome'}</Typography>
-        <Typography variant="body1" color="text.secondary">
-          Signed in as {roleLabels[role]}
-        </Typography>
-      </Stack>
+      <PageHeader
+        title={fullName ? `Welcome, ${fullName}` : 'Welcome'}
+        subtitle={`Signed in as ${roleLabels[role]}`}
+      />
 
       <Grid container spacing={3}>
         <CountCard

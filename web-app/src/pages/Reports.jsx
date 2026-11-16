@@ -20,6 +20,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import PageHeader from '../components/PageHeader'
 import { useReports } from '../hooks/useReports'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
 import {
@@ -147,12 +148,10 @@ export default function Reports() {
 
   return (
     <Stack spacing={3}>
-      <Stack spacing={0.5}>
-        <Typography variant="h1">Reports</Typography>
-        <Typography variant="body1" color="text.secondary">
-          Plant records and sensor activity for a period, ready to export as CSV or PDF
-        </Typography>
-      </Stack>
+      <PageHeader
+        title="Reports"
+        subtitle="Plant records and sensor activity for a period, ready to export as CSV or PDF"
+      />
 
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Stack spacing={1}>
@@ -328,7 +327,7 @@ function ReportSection({ report, result, emptyText, renderers = {}, totalsRow, o
                       <TableCell key={column.key} align={column.numeric ? 'right' : 'left'}>
                         {renderers[column.key]
                           ? renderers[column.key](row)
-                          : displayValue(column.format(row))}
+                          : displayValue((column.display ?? column.format)(row))}
                       </TableCell>
                     ))}
                   </TableRow>
