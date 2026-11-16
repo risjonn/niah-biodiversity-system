@@ -1,9 +1,11 @@
 import { conservationStatusLabels } from './conservationStatus'
+import { formatDateTime } from './formatDateTime'
 import { tokens } from '../theme/theme'
 
 // Shared by the reports page and its CSV and PDF exports, so all three always show the same
 // columns. Each column's format(row) gives a number, a string, or null for "no value"; the page
-// shows null as '—' and the exports leave it empty. Numbers stay numbers (units are in the label)
+// shows null as '—' and the exports leave it empty. A column with display(row) shows that on the
+// page instead, while the exports still use format(row). Numbers stay numbers (units are in the label)
 // so spreadsheets can still sum them and a negative temperature isn't mistaken for a formula.
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -55,8 +57,15 @@ function numberColumn(key, label) {
   return { key, label, numeric: true, format: (row) => toNumber(row[key]) }
 }
 
+// format() is the export value ("16 Oct 2026, 14:30"). The page shows display() instead, in the
+// app's date format ("16 Oct 2026, 2:30 pm").
 function dateTimeColumn(key, label) {
-  return { key, label, format: (row) => formatKuchingDateTime(row[key]) }
+  return {
+    key,
+    label,
+    format: (row) => formatKuchingDateTime(row[key]),
+    display: (row) => formatDateTime(row[key]),
+  }
 }
 
 export const speciesSummaryReport = {

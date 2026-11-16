@@ -1,6 +1,8 @@
 // Time windows, buckets and labels for the sensor charts (components/SensorCharts.jsx). Plain
 // functions with no React or theme imports. Every time is a millisecond timestamp.
 
+import { formatDate, formatDateTime, formatTime } from './formatDateTime'
+
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
 // The sensors are in Niah. Sarawak is UTC+8 all year (no daylight saving), so a fixed offset is
@@ -160,12 +162,6 @@ const sarawakWeekdayDay = new Intl.DateTimeFormat('en-GB', {
   weekday: 'short',
   day: 'numeric',
 })
-const sarawakDayMonth = new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'Asia/Kuching',
-  weekday: 'short',
-  day: 'numeric',
-  month: 'short',
-})
 
 // "14:00"
 export function formatSarawakHour(time) {
@@ -177,11 +173,11 @@ export function formatSarawakDay(time) {
   return sarawakWeekdayDay.format(time)
 }
 
-// Tooltip heading for a bucket: "Mon 9 Nov, 14:00–15:00" for an hour, "Mon 9 Nov" for a day
+// Tooltip heading for a bucket, in the app's date format: "9 Nov 2026, 2:00 pm – 3:00 pm" for an
+// hour, "9 Nov 2026" for a day
 export function formatBucket(time, bucketMs) {
-  const day = sarawakDayMonth.format(time)
-  if (bucketMs >= DAY_MS) return day
-  return `${day}, ${sarawakTime.format(time)}–${sarawakTime.format(time + bucketMs)}`
+  if (bucketMs >= DAY_MS) return formatDate(time)
+  return `${formatDateTime(time)} – ${formatTime(time + bucketMs)}`
 }
 
 function bucketStarts(first, last, size) {

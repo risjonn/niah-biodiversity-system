@@ -27,6 +27,7 @@ import {
   Typography,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
+import PageHeader from '../components/PageHeader'
 import { useAuth } from '../context/AuthContext'
 import SensorCharts from '../components/SensorCharts'
 import { useSensors } from '../hooks/useSensors'
@@ -141,28 +142,26 @@ export default function SensorDashboard() {
 
   return (
     <Stack spacing={3}>
-      <Stack
-        direction={{ xs: 'column', sm: 'row' }}
-        spacing={2}
-        sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'center' } }}
-      >
-        <Typography variant="h1">Sensors</Typography>
-        {snapshot ? (
-          <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-            <Typography variant="body2" color="text.secondary">
-              Last updated <RelativeTime value={snapshot.loadedAt} now={checkedAt} />
-            </Typography>
-            <Button
-              variant="outlined"
-              startIcon={<RefreshIcon />}
-              onClick={refresh}
-              disabled={isRefreshing}
-            >
-              {isRefreshing ? 'Refreshing…' : 'Refresh'}
-            </Button>
-          </Stack>
-        ) : null}
-      </Stack>
+      <PageHeader
+        title="Sensors"
+        action={
+          snapshot ? (
+            <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+              <Typography variant="body2" color="text.secondary">
+                Last updated <RelativeTime value={snapshot.loadedAt} now={checkedAt} />
+              </Typography>
+              <Button
+                variant="outlined"
+                startIcon={<RefreshIcon />}
+                onClick={refresh}
+                disabled={isRefreshing}
+              >
+                {isRefreshing ? 'Refreshing…' : 'Refresh'}
+              </Button>
+            </Stack>
+          ) : null
+        }
+      />
 
       {!snapshot && !loadError ? (
         <Stack sx={{ alignItems: 'center', py: 4 }}>

@@ -23,6 +23,7 @@ import {
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import PageHeader from '../components/PageHeader'
 import { useSpecies } from '../hooks/useSpecies'
 import { usePlants } from '../hooks/usePlants'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
@@ -115,12 +116,10 @@ export default function SpeciesDetail() {
       ) : null}
 
       {!isLoading && !result.speciesError && !result.species ? (
-        <Stack spacing={1}>
-          <Typography variant="h1">Species not found</Typography>
-          <Typography variant="body1" color="text.secondary">
-            This species may have been removed, or the link may be wrong.
-          </Typography>
-        </Stack>
+        <PageHeader
+          title="Species not found"
+          subtitle="This species may have been removed, or the link may be wrong."
+        />
       ) : null}
 
       {!isLoading && result.species ? (
@@ -142,6 +141,25 @@ function SpeciesContent({ species, plants, plantsError, onRetry }) {
 
   return (
     <>
+      <PageHeader
+        title={
+          <Box component="span" sx={{ fontStyle: 'italic' }}>
+            {species.scientific_name}
+          </Box>
+        }
+        subtitle={species.common_name}
+        action={
+          <Stack direction="row" spacing={1}>
+            <Button component={RouterLink} to={`/species/${species.id}/edit`} variant="outlined">
+              Edit
+            </Button>
+            <Button variant="outlined" color="error" onClick={() => setIsDeleteOpen(true)}>
+              Delete
+            </Button>
+          </Stack>
+        }
+      />
+
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={3}>
         {/* Keyed by the URL so a changed photo starts loading again */}
         <ReferencePhoto
@@ -150,14 +168,6 @@ function SpeciesContent({ species, plants, plantsError, onRetry }) {
           alt={`Reference photo of ${species.scientific_name}`}
         />
         <Stack spacing={1} sx={{ alignItems: 'flex-start' }}>
-          <Typography variant="h1" sx={{ fontStyle: 'italic' }}>
-            {species.scientific_name}
-          </Typography>
-          {species.common_name ? (
-            <Typography variant="h3" component="p">
-              {species.common_name}
-            </Typography>
-          ) : null}
           <Typography variant="body1" color="text.secondary">
             {species.family ? `Family: ${species.family}` : 'Family not recorded yet'}
           </Typography>
@@ -167,14 +177,6 @@ function SpeciesContent({ species, plants, plantsError, onRetry }) {
               Last updated {formatDateTime(species.updated_at)}
             </Typography>
           ) : null}
-          <Stack direction="row" spacing={1}>
-            <Button component={RouterLink} to={`/species/${species.id}/edit`} variant="outlined">
-              Edit
-            </Button>
-            <Button variant="outlined" color="error" onClick={() => setIsDeleteOpen(true)}>
-              Delete
-            </Button>
-          </Stack>
         </Stack>
       </Stack>
 

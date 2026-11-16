@@ -17,6 +17,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import PageHeader from '../components/PageHeader'
 import { useSpecies } from '../hooks/useSpecies'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import {
@@ -51,17 +52,14 @@ export default function SpeciesList() {
 
   return (
     <Stack spacing={3}>
-      <Stack
-        direction="row"
-        spacing={2}
-        useFlexGap
-        sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}
-      >
-        <Typography variant="h1">Species</Typography>
-        <Button component={RouterLink} to="/species/new" variant="contained">
-          Add species
-        </Button>
-      </Stack>
+      <PageHeader
+        title="Species"
+        action={
+          <Button component={RouterLink} to="/species/new" variant="contained">
+            Add species
+          </Button>
+        }
+      />
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
         <TextField
