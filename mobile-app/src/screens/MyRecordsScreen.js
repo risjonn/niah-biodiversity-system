@@ -9,10 +9,11 @@ import PlantThumbnail from '../components/PlantThumbnail'
 import ReviewStatusChip from '../components/ReviewStatusChip'
 import ScientificName from '../components/ScientificName'
 import SkeletonRows from '../components/Skeleton'
+import SyncStatusChip from '../components/SyncStatusChip'
 import { useSync } from '../context/SyncContext'
 import { usePlants } from '../hooks/usePlants'
 import { useSpecies } from '../hooks/useSpecies'
-import { getQueuedPhoto } from '../lib/offlineQueue'
+import { queuedPhotoUri, queuedRecordAsPlant } from '../lib/queuedRecord'
 import { reviewStatuses, reviewStatusShortLabels } from '../lib/reviewStatus'
 import { formatRelativeTime } from '../lib/sarawakTime'
 import { theme } from '../theme/theme'
@@ -309,25 +310,6 @@ function byNewest(a, b) {
   return new Date(b.recorded_at) - new Date(a.recorded_at)
 }
 
-// A synced queue row in the shape of a server plant row, with the species names it was saved with
-function queuedRecordAsPlant(record) {
-  return {
-    id: record.id,
-    qr_code: record.qr_code,
-    species_id: record.species_id,
-    review_status: 'pending_review',
-    recorded_at: record.recorded_at,
-    latitude: record.latitude,
-    longitude: record.longitude,
-    location_description: record.location_description,
-    height_cm: record.height_cm,
-    morphological_notes: record.morphological_notes,
-    photo_url: record.uploaded_photo_path,
-    species_scientific_name: record.species_scientific_name,
-    species_common_name: record.species_common_name,
-  }
-}
-
 // One saved record: thumbnail, species, status, QR code and when it was recorded. Opens the
 // record's detail screen.
 function RecordCard({ plant, species, now, onPress }) {
@@ -379,7 +361,7 @@ function QueuedRecordCard({ record, now, busy, onRetry, onDiscard }) {
             <Text style={styles.commonName}>{record.species_common_name}</Text>
           ) : null}
           <View style={styles.meta}>
-            <SyncChip status={record.status} />
+            <SyncStatusChip status={record.status} />
           </View>
           <Text style={styles.metaText}>{formatRelativeTime(record.recorded_at, now)}</Text>
         </View>
@@ -401,40 +383,6 @@ function QueuedRecordCard({ record, now, busy, onRetry, onDiscard }) {
       ) : null}
     </View>
   )
-}
-
-const SYNC_CHIP_LABELS = {
-  pending: 'Waiting to sync',
-  syncing: 'Syncing…',
-  failed: "Couldn't sync",
-}
-
-// In place of the review status chip on a record still on the phone
-function SyncChip({ status }) {
-  const failed = status === 'failed'
-  return (
-    <View style={[styles.syncChip, failed && styles.syncChipFailed]}>
-      <Ionicons
-        name={failed ? 'alert-circle-outline' : 'cloud-upload-outline'}
-        size={14}
-        color={failed ? theme.colors.surfaceWhite : theme.colors.textPrimary}
-        accessibilityElementsHidden
-      />
-      <Text style={[styles.syncChipText, failed && styles.syncChipTextFailed]}>
-        {SYNC_CHIP_LABELS[status] ?? SYNC_CHIP_LABELS.pending}
-      </Text>
-    </View>
-  )
-}
-
-// The copy of the photo saved with a queued record, or undefined when there is none
-function queuedPhotoUri(relativePath) {
-  if (!relativePath) return undefined
-  try {
-    return getQueuedPhoto(relativePath).uri
-  } catch {
-    return undefined
-  }
 }
 
 const styles = StyleSheet.create({
@@ -525,29 +473,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: theme.spacing.md,
-  },
-  syncChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.xs,
-    borderRadius: theme.radius * 2,
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  syncChipFailed: {
-    backgroundColor: theme.colors.error,
-    borderColor: theme.colors.error,
-  },
-  syncChipText: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: theme.typography.caption.fontSize,
-    color: theme.colors.textPrimary,
-  },
-  syncChipTextFailed: {
-    color: theme.colors.surfaceWhite,
   },
   failure: {
     padding: theme.spacing.md,

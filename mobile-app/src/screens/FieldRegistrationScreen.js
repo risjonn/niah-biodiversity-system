@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import {
+  ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -10,15 +11,19 @@ import {
   View,
 } from 'react-native'
 import { useHeaderHeight } from '@react-navigation/elements'
+import Ionicons from '@expo/vector-icons/Ionicons'
 import QRCode from 'react-native-qrcode-svg'
 import Button from '../components/Button'
 import PhotoField from '../components/PhotoField'
+import ReviewStatusChip from '../components/ReviewStatusChip'
 import ScanTagModal from '../components/ScanTagModal'
 import ScientificName from '../components/ScientificName'
 import SpeciesPicker from '../components/SpeciesPicker'
+import SyncStatusChip from '../components/SyncStatusChip'
 import TextInput from '../components/TextInput'
 import { useSync } from '../context/SyncContext'
 import { useCurrentLocation } from '../hooks/useCurrentLocation'
+import { queuedRecordAsPlant } from '../lib/queuedRecord'
 import { theme } from '../theme/theme'
 
 // Side length of the QR image shown after saving, big enough to scan from another phone
@@ -29,6 +34,10 @@ const SUBMIT_TITLES = { saving: 'Saving…', syncing: 'Submitting…' }
 // How long the form waits for a new record to sync before saying it's saved on the phone. On a
 // weak signal a request can hang for a minute; the record keeps syncing in the background.
 const SYNC_WAIT_MS = 15000
+
+// GPS accuracy in metres: up to GOOD is green, up to FAIR amber, anything worse (or no fix) red
+const ACCURACY_GOOD_M = 20
+const ACCURACY_FAIR_M = 50
 
 const EMPTY_FORM = { species: null, height: '', notes: '', locationDescription: '', photo: null }
 
@@ -54,7 +63,11 @@ export default function FieldRegistrationScreen({ navigation }) {
   const liveRecord = savedRecord && records.find((record) => record.id === savedRecord.id)
   if (liveRecord && liveRecord !== savedRecord) setSavedRecord(liveRecord)
 
-  const setField = (name) => (value) => setForm((current) => ({ ...current, [name]: value }))
+  const setField = (name) => (value) => {
+    setForm((current) => ({ ...current, [name]: value }))
+    // A field's message goes once it is changed
+    setFieldErrors((current) => (current[name] ? { ...current, [name]: null } : current))
+  }
 
   async function handleSubmit() {
     if (busy || location.status !== 'ready') return
@@ -106,6 +119,13 @@ export default function FieldRegistrationScreen({ navigation }) {
     location.refresh()
   }
 
+  // Why Submit can't be pressed yet, if it can't
+  const submitHint = !form.species
+    ? 'Choose a species to submit.'
+    : location.status !== 'ready'
+      ? 'You can submit once your location has been captured.'
+      : null
+
   return (
     // As on Settings: on iOS automaticallyAdjustKeyboardInsets insets the scroll view by the part
     // the keyboard covers (above the tab bar) and scrolls the focused field into view. Android
@@ -118,13 +138,23 @@ export default function FieldRegistrationScreen({ navigation }) {
     >
       <ScrollView
         ref={scrollRef}
+        style={styles.flex}
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
       >
         <QueueStatus waitingCount={waitingCount} failedCount={failedCount} />
         {savedRecord ? (
-          <SavedRecord record={savedRecord} onRegisterAnother={handleRegisterAnother} />
+          <SavedRecord
+            record={savedRecord}
+            onRegisterAnother={handleRegisterAnother}
+            onViewRecord={() =>
+              navigation.navigate('RecordDetail', {
+                plantId: savedRecord.id,
+                plant: queuedRecordAsPlant(savedRecord),
+              })
+            }
+          />
         ) : (
           <>
             {/* Under the screen title: checks whether a tag is already registered */}
@@ -134,7 +164,7 @@ export default function FieldRegistrationScreen({ navigation }) {
               accessibilityRole="button"
               accessibilityState={{ disabled: busy }}
               hitSlop={theme.spacing.md}
-              style={({ pressed }) => [styles.scanLink, (pressed || busy) && styles.scanLinkDimmed]}
+              style={({ pressed }) => [styles.scanLink, (pressed || busy) && styles.dimmed]}
             >
               <Text style={styles.scanLinkText}>Already tagged? Scan to check</Text>
             </Pressable>
@@ -148,101 +178,163 @@ export default function FieldRegistrationScreen({ navigation }) {
               />
             ) : null}
 
-            <SpeciesPicker
-              label="Species"
-              value={form.species}
-              onChange={setField('species')}
-              error={fieldErrors.species}
-              disabled={busy}
-              style={styles.field}
-            />
-            <TextInput
-              label="Height (cm, optional)"
-              editable={!busy}
-              value={form.height}
-              onChangeText={setField('height')}
-              error={fieldErrors.height}
-              keyboardType="decimal-pad"
-              style={styles.field}
-            />
-            <TextInput
-              label="Morphological notes (optional)"
-              editable={!busy}
-              value={form.notes}
-              onChangeText={setField('notes')}
-              multiline
-              style={styles.field}
-            />
-            <TextInput
-              label="Location description (optional)"
-              editable={!busy}
-              value={form.locationDescription}
-              onChangeText={setField('locationDescription')}
-              placeholder="e.g. Beside the trail to the Great Cave"
-              returnKeyType="done"
-              style={styles.field}
-            />
+            <Section title="Plant">
+              <SpeciesPicker
+                label="Species"
+                value={form.species}
+                onChange={setField('species')}
+                error={fieldErrors.species}
+                disabled={busy}
+              />
+              <TextInput
+                label="Height (cm, optional)"
+                editable={!busy}
+                value={form.height}
+                onChangeText={setField('height')}
+                error={fieldErrors.height}
+                keyboardType="decimal-pad"
+              />
+              <TextInput
+                label="Morphological notes (optional)"
+                editable={!busy}
+                value={form.notes}
+                onChangeText={setField('notes')}
+                multiline
+              />
+            </Section>
 
-            <PhotoField
-              label="Photo (optional)"
-              value={form.photo}
-              onChange={setField('photo')}
-              disabled={busy}
-              style={styles.field}
-            />
+            <Section title="Photo" note="Optional">
+              <PhotoField value={form.photo} onChange={setField('photo')} disabled={busy} />
+            </Section>
 
-            <LocationPanel location={location} disabled={busy} />
+            <Section title="Location">
+              <LocationCard location={location} disabled={busy} />
+              <TextInput
+                label="Location description (optional)"
+                editable={!busy}
+                value={form.locationDescription}
+                onChangeText={setField('locationDescription')}
+                placeholder="e.g. Beside the trail to the Great Cave"
+                returnKeyType="done"
+              />
+            </Section>
 
             {submitError ? (
               <Text style={styles.formError} accessibilityLiveRegion="polite">
                 {submitError}
               </Text>
             ) : null}
-
-            <Button
-              title={SUBMIT_TITLES[phase] ?? 'Submit registration'}
-              onPress={handleSubmit}
-              disabled={busy || location.status !== 'ready'}
-            />
-            {location.status !== 'ready' ? (
-              <Text style={styles.hint}>You can submit once your location has been captured.</Text>
-            ) : null}
           </>
         )}
       </ScrollView>
+
+      {/* Outside the scroll view, so Submit stays in view at the bottom, just above the tab bar */}
+      {!savedRecord ? (
+        <View style={styles.footer}>
+          <Button
+            title={SUBMIT_TITLES[phase] ?? 'Submit registration'}
+            onPress={handleSubmit}
+            disabled={!form.species || location.status !== 'ready'}
+            loading={busy}
+          />
+          {submitHint && !busy ? (
+            <Text style={styles.hint} accessibilityLiveRegion="polite">
+              {submitHint}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
     </KeyboardAvoidingView>
   )
 }
 
-function LocationPanel({ location, disabled }) {
+// A group of fields under a small heading
+function Section({ title, note, children }) {
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle} accessibilityRole="header">
+          {title}
+        </Text>
+        {note ? <Text style={styles.sectionNote}>{note}</Text> : null}
+      </View>
+      {children}
+    </View>
+  )
+}
+
+// The GPS reading: a status dot, an accuracy chip, the coordinates and a refresh button
+function LocationCard({ location, disabled }) {
   const { status, coords, message, refresh } = location
+  const accuracy = status === 'ready' ? coords.accuracy : null
+  const quality =
+    accuracy == null ? 'none' : accuracy <= ACCURACY_GOOD_M ? 'good' : accuracy <= ACCURACY_FAIR_M ? 'fair' : 'poor'
+  const dotColor =
+    status === 'locating' ? theme.colors.alert : status === 'ready' ? theme.colors.success : theme.colors.error
+  const statusText =
+    status === 'locating' ? 'Finding your location…' : status === 'ready' ? 'Location captured' : 'No location'
 
   return (
-    <View style={styles.panel}>
-      <Text style={styles.panelTitle}>GPS location</Text>
-      {status === 'locating' ? <Text style={styles.panelText}>Finding your location…</Text> : null}
+    <View style={styles.gpsCard}>
+      <View style={styles.gpsHeader}>
+        <View style={[styles.dot, { backgroundColor: dotColor }]} />
+        <Text style={styles.gpsStatus} accessibilityLiveRegion="polite">
+          {statusText}
+        </Text>
+        <AccuracyChip quality={quality} accuracy={accuracy} locating={status === 'locating'} />
+        <Pressable
+          onPress={refresh}
+          disabled={disabled || status === 'locating'}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh location"
+          accessibilityState={{ disabled: disabled || status === 'locating' }}
+          style={({ pressed }) => [styles.iconButton, pressed && styles.dimmed]}
+        >
+          {status === 'locating' ? (
+            <ActivityIndicator color={theme.colors.primary} />
+          ) : (
+            <Ionicons
+              name="refresh"
+              size={22}
+              color={disabled ? theme.colors.textSecondary : theme.colors.primary}
+            />
+          )}
+        </Pressable>
+      </View>
       {status === 'ready' ? (
-        <>
-          <Text style={styles.panelText}>Latitude {coords.latitude.toFixed(6)}</Text>
-          <Text style={styles.panelText}>Longitude {coords.longitude.toFixed(6)}</Text>
-          <Text style={styles.panelMeta}>
-            {coords.accuracy != null
-              ? `Accurate to about ${Math.round(coords.accuracy)} m`
-              : 'Accuracy unknown'}
-          </Text>
-        </>
+        <Text style={styles.coords} selectable>
+          {coords.latitude.toFixed(6)}, {coords.longitude.toFixed(6)}
+        </Text>
       ) : null}
       {message ? (
-        <Text style={styles.panelError} accessibilityLiveRegion="polite">
+        <Text style={styles.gpsError} accessibilityLiveRegion="polite">
           {message}
         </Text>
       ) : null}
-      <Button
-        title="Refresh location"
-        variant="secondary"
-        onPress={refresh}
-        disabled={disabled || status === 'locating'}
-      />
+    </View>
+  )
+}
+
+const ACCURACY_CHIP_COLORS = {
+  good: { backgroundColor: theme.colors.success, color: theme.colors.surfaceWhite },
+  // Amber is too light for white text
+  fair: { backgroundColor: theme.colors.alert, color: theme.colors.textPrimary },
+  poor: { backgroundColor: theme.colors.error, color: theme.colors.surfaceWhite },
+  none: { backgroundColor: theme.colors.error, color: theme.colors.surfaceWhite },
+}
+
+function AccuracyChip({ quality, accuracy, locating }) {
+  // Nothing to say yet while the first reading is coming in
+  if (locating) return null
+  const colors = ACCURACY_CHIP_COLORS[quality]
+  const text = accuracy == null ? 'No fix' : `±${Math.round(accuracy)} m`
+  return (
+    <View
+      style={[styles.accuracyChip, { backgroundColor: colors.backgroundColor }]}
+      accessible
+      accessibilityLabel={accuracy == null ? 'No GPS fix' : `Accurate to about ${Math.round(accuracy)} metres`}
+    >
+      <Text style={[styles.accuracyText, { color: colors.color }]}>{text}</Text>
     </View>
   )
 }
@@ -269,23 +361,20 @@ function QueueStatus({ waitingCount, failedCount }) {
 }
 
 // A record from the queue: its QR code once synced, otherwise a note that it's on the phone
-function SavedRecord({ record, onRegisterAnother }) {
-  const action = (
-    <View style={styles.savedAction}>
-      <Button title="Register another plant" onPress={onRegisterAnother} />
-    </View>
-  )
-
+function SavedRecord({ record, onRegisterAnother, onViewRecord }) {
   if (record.status !== 'synced') {
     return (
       <View style={styles.saved}>
         <Text style={styles.savedHeadingQueued}>Plant saved</Text>
+        <SyncStatusChip status={record.status} style={styles.centred} />
         <Text style={styles.savedText}>
           {record.status === 'failed'
             ? `Saved on this phone, but it couldn't sync: ${withoutFinalStop(record.error_message)}. You can discard it in My Records.`
             : "Saved on this phone. It will sync automatically when you're back online. The QR code will be created when it syncs."}
         </Text>
-        {action}
+        <View style={styles.savedAction}>
+          <Button title="Register another" onPress={onRegisterAnother} />
+        </View>
       </View>
     )
   }
@@ -293,6 +382,7 @@ function SavedRecord({ record, onRegisterAnother }) {
   return (
     <View style={styles.saved}>
       <Text style={styles.savedHeading}>Plant registered</Text>
+      <ReviewStatusChip status="pending_review" style={styles.centred} />
       <Text style={styles.savedText}>
         <ScientificName>{record.species_scientific_name}</ScientificName> has been saved and is
         waiting for review. Label the plant with this QR code:
@@ -308,7 +398,10 @@ function SavedRecord({ record, onRegisterAnother }) {
           backgroundColor={theme.colors.surfaceWhite}
         />
       </View>
-      {action}
+      <View style={styles.savedActions}>
+        <Button title="View record" onPress={onViewRecord} />
+        <Button title="Register another" variant="secondary" onPress={onRegisterAnother} />
+      </View>
     </View>
   )
 }
@@ -336,20 +429,16 @@ function parseHeight(text) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  // The extra bottom padding lets the last button scroll fully clear of the tab bar
   container: {
     padding: theme.spacing.lg,
-    paddingBottom: theme.spacing.xxxl,
+    paddingBottom: theme.spacing.xl,
+    gap: theme.spacing.xl,
   },
-  field: {
-    marginBottom: theme.spacing.lg,
+  dimmed: {
+    opacity: 0.6,
   },
   scanLink: {
     alignSelf: 'flex-start',
-    marginBottom: theme.spacing.lg,
-  },
-  scanLinkDimmed: {
-    opacity: 0.6,
   },
   scanLinkText: {
     fontFamily: 'Inter_500Medium',
@@ -357,51 +446,107 @@ const styles = StyleSheet.create({
     color: theme.colors.primary,
     textDecorationLine: 'underline',
   },
-  panel: {
-    padding: theme.spacing.lg,
+  section: {
+    gap: theme.spacing.md,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: theme.spacing.sm,
+    paddingBottom: theme.spacing.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+  },
+  sectionTitle: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: theme.typography.bodySmall.fontSize,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    color: theme.colors.textSecondary,
+  },
+  sectionNote: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: theme.typography.caption.fontSize,
+    color: theme.colors.textSecondary,
+  },
+  gpsCard: {
+    padding: theme.spacing.md,
     gap: theme.spacing.sm,
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.radius,
     backgroundColor: theme.colors.surfaceWhite,
-    marginBottom: theme.spacing.lg,
   },
-  panelTitle: {
+  gpsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.sm,
+  },
+  dot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  gpsStatus: {
+    flex: 1,
     fontFamily: 'Inter_500Medium',
-    fontSize: theme.typography.bodySmall.fontSize,
-    color: theme.colors.textPrimary,
-  },
-  panelText: {
-    fontFamily: 'Inter_400Regular',
     fontSize: theme.typography.body.fontSize,
     color: theme.colors.textPrimary,
   },
-  panelMeta: {
+  accuracyChip: {
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 2,
+    borderRadius: theme.radius * 2,
+  },
+  accuracyText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: theme.typography.caption.fontSize,
+  },
+  iconButton: {
+    width: theme.buttonHeight,
+    height: theme.buttonHeight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: -theme.spacing.sm,
+    marginRight: -theme.spacing.sm,
+  },
+  coords: {
     fontFamily: 'Inter_400Regular',
     fontSize: theme.typography.caption.fontSize,
     color: theme.colors.textSecondary,
   },
-  panelError: {
+  gpsError: {
     fontFamily: 'Inter_400Regular',
     fontSize: theme.typography.bodySmall.fontSize,
+    lineHeight: 20,
     color: theme.colors.error,
   },
   formError: {
     fontFamily: 'Inter_400Regular',
     fontSize: theme.typography.bodySmall.fontSize,
     color: theme.colors.error,
-    marginBottom: theme.spacing.lg,
+  },
+  footer: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.md,
+    paddingBottom: theme.spacing.md,
+    gap: theme.spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceWhite,
   },
   hint: {
     fontFamily: 'Inter_400Regular',
     fontSize: theme.typography.caption.fontSize,
     color: theme.colors.textSecondary,
     textAlign: 'center',
-    marginTop: theme.spacing.sm,
   },
   saved: {
     alignItems: 'center',
     gap: theme.spacing.lg,
+  },
+  centred: {
+    alignSelf: 'center',
   },
   savedHeading: {
     fontFamily: 'Inter_600SemiBold',
@@ -422,7 +567,6 @@ const styles = StyleSheet.create({
     borderLeftColor: theme.colors.alert,
     borderRadius: theme.radius,
     backgroundColor: theme.colors.surfaceWhite,
-    marginBottom: theme.spacing.lg,
   },
   queueStatusText: {
     fontFamily: 'Inter_500Medium',
@@ -452,5 +596,9 @@ const styles = StyleSheet.create({
   },
   savedAction: {
     alignSelf: 'stretch',
+  },
+  savedActions: {
+    alignSelf: 'stretch',
+    gap: theme.spacing.md,
   },
 })

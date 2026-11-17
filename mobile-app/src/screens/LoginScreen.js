@@ -3,15 +3,14 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native'
-import Ionicons from '@expo/vector-icons/Ionicons'
 import Button from '../components/Button'
 import HeaderBand from '../components/HeaderBand'
+import PasswordInput from '../components/PasswordInput'
 import TextInput from '../components/TextInput'
 import { useAuth } from '../context/AuthContext'
 import { theme } from '../theme/theme'
@@ -20,7 +19,6 @@ export default function LoginScreen({ navigation }) {
   const { signIn, error } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
   const [fieldErrors, setFieldErrors] = useState({})
   const [submitting, setSubmitting] = useState(false)
   const passwordRef = useRef(null)
@@ -87,34 +85,18 @@ export default function LoginScreen({ navigation }) {
             onSubmitEditing={() => passwordRef.current?.focus()}
             style={styles.field}
           />
-          <TextInput
+          {/* With a show/hide button, the same as the change password fields in Settings */}
+          <PasswordInput
             ref={passwordRef}
             label="Password"
             value={password}
             onChangeText={setPassword}
             error={fieldErrors.password}
-            secureTextEntry={!showPassword}
-            autoCapitalize="none"
             autoComplete="current-password"
-            autoCorrect={false}
             textContentType="password"
             returnKeyType="go"
             onSubmitEditing={handleSignIn}
             style={styles.field}
-            accessory={
-              <Pressable
-                onPress={() => setShowPassword((shown) => !shown)}
-                accessibilityRole="button"
-                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
-                style={({ pressed }) => [styles.toggle, pressed && styles.pressed]}
-              >
-                <Ionicons
-                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                  size={22}
-                  color={theme.colors.textSecondary}
-                />
-              </Pressable>
-            }
           />
 
           {error ? (
@@ -167,15 +149,6 @@ const styles = StyleSheet.create({
   },
   field: {
     marginBottom: theme.spacing.lg,
-  },
-  toggle: {
-    width: theme.buttonHeight,
-    height: theme.buttonHeight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pressed: {
-    opacity: 0.6,
   },
   formError: {
     fontFamily: 'Inter_400Regular',

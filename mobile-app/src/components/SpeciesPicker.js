@@ -11,13 +11,16 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Button from './Button'
+import ConservationStatusChip from './ConservationStatusChip'
+import PlantThumbnail from './PlantThumbnail'
 import ScientificName from './ScientificName'
 import TextInput from './TextInput'
 import { useSpecies } from '../hooks/useSpecies'
 import { theme } from '../theme/theme'
 
 // A form field for choosing a species. Looks like TextInput (label, box, error beneath) and opens
-// a searchable list in a modal. Loads the species list itself when first shown.
+// a searchable list in a modal, each species with its reference photo (or a leaf in its
+// conservation colour) and conservation status. Loads the species list itself when first shown.
 export default function SpeciesPicker({ label, value, onChange, error, disabled = false, style }) {
   const { fetchSpecies } = useSpecies()
   const [open, setOpen] = useState(false)
@@ -70,7 +73,7 @@ export default function SpeciesPicker({ label, value, onChange, error, disabled 
         style={[styles.field, error && styles.fieldError, disabled && styles.fieldDisabled]}
       >
         {value ? (
-          <SpeciesName species={value} />
+          <SpeciesRow species={value} thumbnailSize={40} />
         ) : (
           <Text style={styles.placeholder}>Choose a species</Text>
         )}
@@ -138,7 +141,7 @@ export default function SpeciesPicker({ label, value, onChange, error, disabled 
                     pressed && styles.optionPressed,
                   ]}
                 >
-                  <SpeciesName species={item} />
+                  <SpeciesRow species={item} thumbnailSize={48} />
                 </Pressable>
               )}
             />
@@ -153,11 +156,22 @@ export default function SpeciesPicker({ label, value, onChange, error, disabled 
   )
 }
 
-function SpeciesName({ species }) {
+// Photo, names and conservation status: in the list, and on the field once chosen
+function SpeciesRow({ species, thumbnailSize }) {
   return (
-    <View>
-      <ScientificName style={styles.scientificName}>{species.scientific_name}</ScientificName>
-      {species.common_name ? <Text style={styles.commonName}>{species.common_name}</Text> : null}
+    <View style={styles.row}>
+      <PlantThumbnail
+        uri={species.reference_photo_url}
+        size={thumbnailSize}
+        tint={theme.chart.conservationStatus[species.conservation_status]}
+      />
+      <View style={styles.rowText}>
+        <ScientificName style={styles.scientificName}>{species.scientific_name}</ScientificName>
+        {species.common_name ? <Text style={styles.commonName}>{species.common_name}</Text> : null}
+        {species.conservation_status ? (
+          <ConservationStatusChip status={species.conservation_status} style={styles.chip} />
+        ) : null}
+      </View>
     </View>
   )
 }
@@ -204,6 +218,18 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     fontSize: theme.typography.caption.fontSize,
     color: theme.colors.error,
+    marginTop: theme.spacing.xs,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.md,
+  },
+  rowText: {
+    flex: 1,
+    gap: 2,
+  },
+  chip: {
     marginTop: theme.spacing.xs,
   },
   scientificName: {

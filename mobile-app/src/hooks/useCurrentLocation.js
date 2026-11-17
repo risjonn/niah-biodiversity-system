@@ -42,8 +42,8 @@ async function readLocation() {
         status: 'denied',
         coords: null,
         message: permission.canAskAgain
-          ? 'Location permission is needed to record where this plant is. Tap "Refresh location" to allow it.'
-          : 'Location access is turned off for this app. Turn it on in your phone settings, then tap "Refresh location".',
+          ? 'Location permission is needed to record where this plant is. Tap the refresh button to allow it.'
+          : 'Location access is turned off for this app. Turn it on in your phone settings, then tap the refresh button.',
       }
     }
 
@@ -56,7 +56,7 @@ async function readLocation() {
       status: 'error',
       coords: null,
       message:
-        'Your location could not be read. Check that location services are turned on, then tap "Refresh location".',
+        'Your location could not be read. Check that location services are turned on, then tap the refresh button.',
     }
   }
 }
