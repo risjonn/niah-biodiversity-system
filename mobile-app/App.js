@@ -6,6 +6,7 @@ import {
   Inter_600SemiBold,
 } from '@expo-google-fonts/inter'
 import Ionicons from '@expo/vector-icons/Ionicons'
+import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { AuthProvider } from './src/context/AuthContext'
 import { SyncProvider } from './src/context/SyncContext'
 import RootNavigator from './src/navigation/RootNavigator'
@@ -26,10 +27,14 @@ export default function App() {
   }
 
   return (
-    <AuthProvider>
-      <SyncProvider>
-        <RootNavigator />
-      </SyncProvider>
-    </AuthProvider>
+    // Safe area insets (notch, status bar, home indicator) for screens that draw their own top
+    // band, such as Home and Login
+    <SafeAreaProvider>
+      <AuthProvider>
+        <SyncProvider>
+          <RootNavigator />
+        </SyncProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
   )
 }

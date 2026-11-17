@@ -1,5 +1,14 @@
 import { useRef, useState } from 'react'
-import { Keyboard, KeyboardAvoidingView, ScrollView, StyleSheet, Text, View } from 'react-native'
+import {
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
 import { useHeaderHeight } from '@react-navigation/elements'
 import QRCode from 'react-native-qrcode-svg'
 import Button from '../components/Button'
@@ -98,29 +107,37 @@ export default function FieldRegistrationScreen() {
   }
 
   return (
+    // As on Settings: on iOS automaticallyAdjustKeyboardInsets insets the scroll view by the part
+    // the keyboard covers (above the tab bar) and scrolls the focused field into view. Android
+    // ignores it, so the padding makes the room there instead (on iOS as well it would leave room
+    // for the keyboard twice).
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior="padding"
+      behavior={Platform.OS === 'android' ? 'padding' : undefined}
       keyboardVerticalOffset={headerHeight}
     >
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
       >
         <QueueStatus waitingCount={waitingCount} failedCount={failedCount} />
         {savedRecord ? (
           <SavedRecord record={savedRecord} onRegisterAnother={handleRegisterAnother} />
         ) : (
           <>
-            <View style={styles.field}>
-              <Button
-                title="Scan tag"
-                variant="secondary"
-                onPress={() => setScanOpen(true)}
-                disabled={busy}
-              />
-            </View>
+            {/* Under the screen title: checks whether a tag is already registered */}
+            <Pressable
+              onPress={() => setScanOpen(true)}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: busy }}
+              hitSlop={theme.spacing.md}
+              style={({ pressed }) => [styles.scanLink, (pressed || busy) && styles.scanLinkDimmed]}
+            >
+              <Text style={styles.scanLinkText}>Already tagged? Scan to check</Text>
+            </Pressable>
             {scanOpen ? (
               <ScanTagModal onClose={() => setScanOpen(false)} />
             ) : null}
@@ -313,12 +330,26 @@ function parseHeight(text) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  // The extra bottom padding lets the last button scroll fully clear of the tab bar
   container: {
     padding: theme.spacing.lg,
-    paddingBottom: theme.spacing.xxl,
+    paddingBottom: theme.spacing.xxxl,
   },
   field: {
     marginBottom: theme.spacing.lg,
+  },
+  scanLink: {
+    alignSelf: 'flex-start',
+    marginBottom: theme.spacing.lg,
+  },
+  scanLinkDimmed: {
+    opacity: 0.6,
+  },
+  scanLinkText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: theme.typography.bodySmall.fontSize,
+    color: theme.colors.primary,
+    textDecorationLine: 'underline',
   },
   panel: {
     padding: theme.spacing.lg,

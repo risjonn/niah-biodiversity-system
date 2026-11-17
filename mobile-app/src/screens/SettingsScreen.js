@@ -397,9 +397,11 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
   },
 
+  // The extra bottom padding lets Sign out scroll fully clear of the tab bar
   container: {
     flexGrow: 1,
     padding: theme.spacing.lg,
+    paddingBottom: theme.spacing.xxxl,
     gap: theme.spacing.lg,
     backgroundColor: theme.colors.surface,
   },

@@ -1,6 +1,8 @@
 import { ActivityIndicator, StyleSheet, View } from 'react-native'
 import { NavigationContainer } from '@react-navigation/native'
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
+import Ionicons from '@expo/vector-icons/Ionicons'
 import { StatusBar } from 'expo-status-bar'
 import HeaderIconButton from '../components/HeaderIconButton'
 import { useAuth } from '../context/AuthContext'
@@ -15,35 +17,91 @@ import SettingsScreen from '../screens/SettingsScreen'
 import PlantSpeciesScreen from '../screens/PlantSpeciesScreen'
 
 const Stack = createNativeStackNavigator()
+const Tab = createBottomTabNavigator()
 
-const screenOptions = {
+// The primary-coloured header, shared by the stack and the tabs
+const headerOptions = {
   headerStyle: { backgroundColor: theme.colors.primary },
   headerTintColor: theme.colors.surfaceWhite,
   headerTitleStyle: {
     fontFamily: 'Inter_600SemiBold',
     fontSize: theme.typography.heading3.fontSize,
   },
+}
+
+const screenOptions = {
+  ...headerOptions,
   // Back button shows only the chevron, never the previous screen's title (iOS; Android
   // never shows one)
   headerBackButtonDisplayMode: 'minimal',
   contentStyle: { backgroundColor: theme.colors.surface },
 }
 
+// Botanists' tabs, left to right. The route names are the ones the screens already navigate to
+// (e.g. navigation.navigate('FieldRegistration')), so those calls switch tab. `icon` is the
+// Ionicons name when selected; the outline version is used otherwise.
+const BOTANIST_TABS = [
+  { name: 'BotanistHome', component: BotanistHomeScreen, label: 'Home', icon: 'home', title: 'Home' },
+  { name: 'FieldRegistration', component: FieldRegistrationScreen, label: 'Register', icon: 'add-circle', title: 'Register Plant' },
+  { name: 'MyRecords', component: MyRecordsScreen, label: 'Records', icon: 'list', title: 'My Records' },
+  { name: 'PlantSpecies', component: PlantSpeciesScreen, label: 'Species', icon: 'leaf', title: 'Plant Species' },
+  { name: 'Settings', component: SettingsScreen, label: 'Settings', icon: 'settings', title: 'Settings' },
+]
+
+// Signed-in botanists: a bottom tab bar with every botanist screen. The tab bar keeps clear of
+// the iPhone home indicator by itself (it pads by the safe area inset).
+function BotanistTabs() {
+  return (
+    <Tab.Navigator
+      screenOptions={{
+        ...headerOptions,
+        tabBarActiveTintColor: theme.colors.primary,
+        tabBarInactiveTintColor: theme.colors.textSecondary,
+        tabBarStyle: {
+          backgroundColor: theme.colors.surfaceWhite,
+          borderTopColor: theme.colors.border,
+        },
+        tabBarLabelStyle: {
+          fontFamily: 'Inter_500Medium',
+          fontSize: theme.typography.caption.fontSize,
+        },
+        // On Android the bar would otherwise ride up on top of the keyboard on the forms
+        tabBarHideOnKeyboard: true,
+        sceneStyle: { backgroundColor: theme.colors.surface },
+      }}
+    >
+      {BOTANIST_TABS.map((tab) => (
+        <Tab.Screen
+          key={tab.name}
+          name={tab.name}
+          component={tab.component}
+          options={{
+            title: tab.title,
+            tabBarLabel: tab.label,
+            tabBarIcon: ({ focused, color, size }) => (
+              <Ionicons name={focused ? tab.icon : `${tab.icon}-outline`} size={size} color={color} />
+            ),
+            // Home draws its own greeting band in place of the header
+            ...(tab.name === 'BotanistHome' && { headerShown: false }),
+          }}
+        />
+      ))}
+    </Tab.Navigator>
+  )
+}
+
 const signedInScreens = {
-  BotanistHome: { component: BotanistHomeScreen, options: { title: 'Niah Biodiversity' } },
-  FieldRegistration: { component: FieldRegistrationScreen, options: { title: 'Register Plant' } },
-  PlantSpecies: { component: PlantSpeciesScreen, options: { title: 'Plant Species' } },
-  MyRecords: { component: MyRecordsScreen, options: { title: 'My Records' } },
+  BotanistTabs: { component: BotanistTabs, options: { headerShown: false } },
   StaffHome: { component: StaffHomeScreen, options: { title: 'Staff Dashboard' } },
   Settings: { component: SettingsScreen },
 }
 
 // Screens each role can open once signed in. Each role lands on the first screen in its list
 // (order is used instead of initialRouteName, which the navigator only reads when first created).
-// Conservation officers' and admins' own screens come in later issues, so for now they land on
-// a placeholder dashboard.
+// Botanists get every screen through their tabs. Conservation officers' and admins' own screens
+// come in later issues, so for now they land on a placeholder dashboard.
 const screensByRole = {
-  botanist: ['BotanistHome', 'MyRecords', 'FieldRegistration', 'PlantSpecies', 'Settings'],
+  botanist: ['BotanistTabs'],
   conservation_officer: ['StaffHome', 'Settings'],
   admin: ['StaffHome', 'Settings'],
 }
@@ -64,7 +122,7 @@ export default function RootNavigator() {
       <StatusBar style="light" />
       <Stack.Navigator screenOptions={screenOptions}>
         {role ? (
-          <Stack.Group screenOptions={signedInScreenOptions}>
+          <Stack.Group screenOptions={staffScreenOptions}>
             {screensByRole[role].map((name) => (
               <Stack.Screen key={name} name={name} {...signedInScreens[name]} />
             ))}
@@ -72,7 +130,8 @@ export default function RootNavigator() {
         ) : (
           // Signed out: only the login screen and guest mode are reachable
           <Stack.Group screenOptions={{ animationTypeForReplace: 'pop' }}>
-            <Stack.Screen name="Login" component={LoginScreen} options={{ title: 'Niah Biodiversity' }} />
+            {/* Login draws its own title band in place of the header */}
+            <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
             <Stack.Screen name="GuestScan" component={GuestScanScreen} options={{ title: 'Explore' }} />
           </Stack.Group>
         )}
@@ -81,9 +140,10 @@ export default function RootNavigator() {
   )
 }
 
-// Every signed-in screen links to Settings, which is where users sign out
-function signedInScreenOptions({ navigation, route }) {
-  if (route.name === 'Settings') return {}
+// Staff have no tab bar, so their dashboard keeps a settings button in the header, which is where
+// they sign out. Botanists reach Settings from the tab bar instead.
+function staffScreenOptions({ navigation, route }) {
+  if (route.name !== 'StaffHome') return {}
   return {
     headerRight: () => (
       <HeaderIconButton

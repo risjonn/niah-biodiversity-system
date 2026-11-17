@@ -7,7 +7,7 @@ const LOOKUP_FAILED = { message: "Couldn't check this tag. Connect to the intern
 
 // Botanist lookup. Botanists can only read their own rows in plants (database/schema/005), so
 // approved records from any botanist come from plants_public and the rest from plants.
-// Resolves to { plant: { id, qr_code, review_status } } or { message }.
+// Resolves to { plant: { id, qr_code, species_id, review_status } } or { message }.
 export function usePlantLookup() {
   return useCallback(async (rawCode) => {
     const code = normaliseQrCode(rawCode)
@@ -16,7 +16,7 @@ export function usePlantLookup() {
     try {
       const approved = await supabase
         .from('plants_public')
-        .select('id, qr_code')
+        .select('id, qr_code, species_id')
         .eq('qr_code', code)
         .maybeSingle()
       if (approved.error) return LOOKUP_FAILED
@@ -24,7 +24,7 @@ export function usePlantLookup() {
 
       const own = await supabase
         .from('plants')
-        .select('id, qr_code, review_status')
+        .select('id, qr_code, species_id, review_status')
         .eq('qr_code', code)
         .maybeSingle()
       if (own.error) return LOOKUP_FAILED
