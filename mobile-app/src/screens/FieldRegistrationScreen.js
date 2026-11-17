@@ -32,7 +32,7 @@ const SYNC_WAIT_MS = 15000
 
 const EMPTY_FORM = { species: null, height: '', notes: '', locationDescription: '', photo: null }
 
-export default function FieldRegistrationScreen() {
+export default function FieldRegistrationScreen({ navigation }) {
   const { records, waitingCount, failedCount, queueRecord } = useSync()
   const location = useCurrentLocation()
   const headerHeight = useHeaderHeight()
@@ -139,7 +139,13 @@ export default function FieldRegistrationScreen() {
               <Text style={styles.scanLinkText}>Already tagged? Scan to check</Text>
             </Pressable>
             {scanOpen ? (
-              <ScanTagModal onClose={() => setScanOpen(false)} />
+              <ScanTagModal
+                onClose={() => setScanOpen(false)}
+                onViewRecord={(plant) => {
+                  setScanOpen(false)
+                  navigation.navigate('RecordDetail', { plantId: plant.id, plant })
+                }}
+              />
             ) : null}
 
             <SpeciesPicker

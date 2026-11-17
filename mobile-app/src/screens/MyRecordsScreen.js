@@ -1,79 +1,112 @@
-import { useEffect, useRef, useState } from 'react'
-import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { useFocusEffect } from '@react-navigation/native'
+import Ionicons from '@expo/vector-icons/Ionicons'
 import Button from '../components/Button'
+import EmptyState from '../components/EmptyState'
+import FilterChip from '../components/FilterChip'
+import PlantThumbnail from '../components/PlantThumbnail'
+import ReviewStatusChip from '../components/ReviewStatusChip'
 import ScientificName from '../components/ScientificName'
+import SkeletonRows from '../components/Skeleton'
 import { useSync } from '../context/SyncContext'
 import { usePlants } from '../hooks/usePlants'
 import { useSpecies } from '../hooks/useSpecies'
+import { getQueuedPhoto } from '../lib/offlineQueue'
+import { reviewStatuses, reviewStatusShortLabels } from '../lib/reviewStatus'
+import { formatRelativeTime } from '../lib/sarawakTime'
 import { theme } from '../theme/theme'
-import { usePlantPhoto } from '../hooks/usePlantPhoto'
 
 const SYNC_STOPPED_MESSAGE =
   "Couldn't reach the server. The records will sync automatically when you're back online."
 
-export default function MyRecordsScreen() {
+// 'all' or a review_status
+const FILTERS = ['all', ...reviewStatuses]
+const FILTER_LABELS = { all: 'All', ...reviewStatusShortLabels }
+const EMPTY_MESSAGES = {
+  all: "You haven't registered any plants yet. Your records will show here.",
+  pending_review: 'No pending records',
+  approved: 'No approved records',
+  rejected: 'No rejected records',
+}
+
+// The botanist's own records, filtered by review status. Records still on the phone (waiting to
+// sync, or synced but not yet in the server's list) are included too.
+//
+// Home's status tiles open this tab with a `status` route param. The tab stays mounted, so the
+// param is applied whenever it changes and then cleared: tapping the same status again later is
+// a change again, and tapping the tab itself (no param) keeps the last chosen filter.
+export default function MyRecordsScreen({ navigation, route }) {
   const { fetchMyPlants } = usePlants()
   const { fetchSpecies } = useSpecies()
   const { records, syncing, syncedVersion, syncNow, retry, discard, markShown } = useSync()
 
   const [plants, setPlants] = useState([])
-  const [species, setSpecies] = useState([])
+  const [speciesById, setSpeciesById] = useState(() => new Map())
+  // True until the server records have loaded once
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   // { message, offline } when the server records couldn't be loaded
   const [error, setError] = useState(null)
   const [syncMessage, setSyncMessage] = useState(null)
   // Records being retried or discarded, so their buttons can't be pressed twice
   const [busyIds, setBusyIds] = useState([])
+  const [filter, setFilter] = useState('all')
+  // When the records were loaded, for the relative times
+  const [now, setNow] = useState(() => Date.now())
 
+  // The status asked for by Home, applied while rendering so the right filter shows straight away
+  const requestedStatus = route.params?.status
+  const [seenRequest, setSeenRequest] = useState(undefined)
+  if (requestedStatus !== seenRequest) {
+    setSeenRequest(requestedStatus)
+    if (requestedStatus !== undefined) {
+      setFilter(FILTERS.includes(requestedStatus) ? requestedStatus : 'all')
+    }
+  }
+  // ...and then cleared, so the next request is a change even if it asks for the same status
   useEffect(() => {
-    loadRecords()
-  }, [])
+    if (requestedStatus !== undefined) navigation.setParams({ status: undefined })
+  }, [requestedStatus, navigation])
+
+  async function loadRecords() {
+    setError(null)
+    const [plantsResult, speciesResult] = await Promise.all([fetchMyPlants(), fetchSpecies()])
+    setNow(Date.now())
+    if (plantsResult.error) {
+      setError({ message: plantsResult.error, offline: !plantsResult.code })
+    } else {
+      setPlants(plantsResult.data)
+      // The species list falls back to the copy saved on the phone; without it names read
+      // "Unknown species"
+      setSpeciesById(new Map(speciesResult.data.map((species) => [species.id, species])))
+    }
+    setLoading(false)
+  }
+
+  // The effects below always call the latest loadRecords
+  const loadRef = useRef(loadRecords)
+  useEffect(() => {
+    loadRef.current = loadRecords
+  })
+
+  // Every time the tab comes into view, so review decisions made meanwhile show up
+  useFocusEffect(
+    useCallback(() => {
+      loadRef.current()
+    }, []),
+  )
 
   // Records that sync while this screen is open move from the queue to the server list
   const openedAtSyncedVersion = useRef(syncedVersion)
   useEffect(() => {
-    if (syncedVersion !== openedAtSyncedVersion.current) loadRecords({ quiet: true })
+    if (syncedVersion !== openedAtSyncedVersion.current) loadRef.current()
   }, [syncedVersion])
 
-  async function loadRecords({ quiet = false } = {}) {
-    if (!quiet) setLoading(true)
-    setError(null)
-
-    const [plantsResult, speciesResult] = await Promise.all([
-      fetchMyPlants(),
-      fetchSpecies(),
-    ])
-
-    if (plantsResult.error) {
-      setError({ message: plantsResult.error, offline: !plantsResult.code })
-      setPlants([])
-      setLoading(false)
-      return
-    }
-
-    if (speciesResult.error) {
-      setError({ message: speciesResult.error, offline: false })
-      setPlants([])
-      setLoading(false)
-      return
-    }
-
-    setPlants(plantsResult.data)
-    setSpecies(speciesResult.data)
-    setLoading(false)
-  }
-
-  function getSpecies(plant) {
-    return species.find((item) => item.id === plant.species_id)
+  async function handleRefresh() {
+    setRefreshing(true)
+    await loadRecords()
+    setRefreshing(false)
   }
 
   const serverIds = new Set(plants.map((plant) => plant.id))
@@ -83,7 +116,6 @@ export default function MyRecordsScreen() {
   const recentlySynced = records.filter(
     (record) => record.status === 'synced' && !serverIds.has(record.id),
   )
-  const hasQueue = unsynced.length > 0 || recentlySynced.length > 0
   const syncedIdsInServerList = records
     .filter((record) => record.status === 'synced' && serverIds.has(record.id))
     .map((record) => record.id)
@@ -94,16 +126,35 @@ export default function MyRecordsScreen() {
     if (syncedIdsInServerList) markShown(syncedIdsInServerList.split(','))
   }, [syncedIdsInServerList, markShown])
 
-  // QR codes shown from the queue count as seen when the botanist leaves the screen, so the
-  // record doesn't vanish while they're reading it
+  // QR codes shown from the queue count as seen when the botanist leaves the tab, so the record
+  // doesn't vanish while they're reading it
   const shownFromQueue = useRef(new Set())
   useEffect(() => {
     recentlySynced.forEach((record) => shownFromQueue.current.add(record.id))
   })
-  useEffect(() => {
-    const shown = shownFromQueue.current
-    return () => markShown([...shown])
-  }, [markShown])
+  useFocusEffect(
+    useCallback(() => {
+      const shown = shownFromQueue.current
+      return () => {
+        if (shown.size > 0) markShown([...shown])
+        shown.clear()
+      }
+    }, [markShown]),
+  )
+
+  // Synced records from the queue, shaped like server rows. They are saved, so pending review.
+  const queuedAsPlants = recentlySynced.map(queuedRecordAsPlant)
+  const allRecords = [...queuedAsPlants, ...plants].sort(byNewest)
+  const counts = {
+    all: allRecords.length + unsynced.length,
+    // Records waiting to sync will be pending review once they're saved
+    pending_review:
+      allRecords.filter((plant) => plant.review_status === 'pending_review').length + unsynced.length,
+    approved: allRecords.filter((plant) => plant.review_status === 'approved').length,
+    rejected: allRecords.filter((plant) => plant.review_status === 'rejected').length,
+  }
+  const shown = filter === 'all' ? allRecords : allRecords.filter((plant) => plant.review_status === filter)
+  const showQueue = unsynced.length > 0 && (filter === 'all' || filter === 'pending_review')
 
   async function handleSyncNow() {
     setSyncMessage(null)
@@ -147,57 +198,55 @@ export default function MyRecordsScreen() {
     )
   }
 
-  if (loading && !hasQueue) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator
-          size="large"
-          color={theme.colors.primary}
-          accessibilityLabel="Loading plant records"
-        />
-        <Text style={styles.loadingText}>Loading your records…</Text>
-      </View>
-    )
+  function openRecord(plant) {
+    navigation.navigate('RecordDetail', { plantId: plant.id, plant })
   }
 
-  if (error && !hasQueue) {
-    return (
-      <View style={styles.center}>
-        <Text style={styles.errorTitle}>Unable to load records</Text>
-        <Text style={styles.errorText}>{error.message}</Text>
-
-        <Pressable style={styles.retryButton} onPress={() => loadRecords()}>
-          <Text style={styles.retryText}>Try Again</Text>
-        </Pressable>
-      </View>
-    )
-  }
+  const hasAnything = allRecords.length > 0 || unsynced.length > 0
 
   return (
     <ScrollView
+      style={styles.screen}
       contentContainerStyle={styles.container}
-      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          tintColor={theme.colors.primary}
+          colors={[theme.colors.primary]}
+        />
+      }
     >
-      <View style={styles.header}>
-        <Text style={styles.title}>My Records</Text>
-        <Text style={styles.subtitle}>
-          Plant records you have submitted and their review status.
-        </Text>
+      <View style={styles.chips} accessibilityLabel="Filter by review status">
+        {FILTERS.map((value) => (
+          <FilterChip
+            key={value}
+            label={FILTER_LABELS[value]}
+            // No counts until the server records have loaded, since they'd be too low
+            count={loading ? null : counts[value]}
+            color={value === 'all' ? undefined : theme.chart.reviewStatus[value]}
+            selected={filter === value}
+            onPress={() => setFilter(value)}
+          />
+        ))}
       </View>
 
-      {unsynced.length > 0 ? (
+      {showQueue ? (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Waiting to sync</Text>
+          <Text style={styles.sectionTitle} accessibilityRole="header">
+            Waiting to sync
+          </Text>
           {unsynced.map((record) => (
             <QueuedRecordCard
               key={record.id}
               record={record}
+              now={now}
               busy={busyIds.includes(record.id)}
               onRetry={() => handleRetry(record)}
               onDiscard={() => handleDiscard(record)}
             />
           ))}
-          {syncMessage ? <Text style={styles.syncMessage}>{syncMessage}</Text> : null}
+          {syncMessage ? <Text style={styles.note}>{syncMessage}</Text> : null}
           <Button
             title={syncing ? 'Syncing…' : 'Sync now'}
             variant="secondary"
@@ -207,135 +256,138 @@ export default function MyRecordsScreen() {
         </View>
       ) : null}
 
-      {recentlySynced.length > 0 ? (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Synced from this phone</Text>
-          {recentlySynced.map((record) => (
-            <QueuedRecordCard key={record.id} record={record} />
+      {loading && !error ? <SkeletonRows count={4} label="Loading your records" /> : null}
+
+      {error && !hasAnything ? (
+        <EmptyState
+          icon="cloud-offline-outline"
+          message={error.message}
+          action={{ title: 'Try again', onPress: handleRefresh }}
+        />
+      ) : null}
+      {error && hasAnything ? (
+        <View style={styles.errorNote}>
+          <Text style={styles.note}>
+            {error.offline
+              ? "Your synced records can't be updated while you're offline."
+              : error.message}
+          </Text>
+          <Button title="Try again" variant="secondary" onPress={handleRefresh} />
+        </View>
+      ) : null}
+
+      {!loading && !error && shown.length === 0 && !showQueue ? (
+        <EmptyState
+          icon={filter === 'rejected' ? 'checkmark-circle-outline' : 'leaf-outline'}
+          message={EMPTY_MESSAGES[filter]}
+          action={
+            filter === 'all'
+              ? { title: 'Register a plant', onPress: () => navigation.navigate('FieldRegistration') }
+              : undefined
+          }
+        />
+      ) : null}
+
+      {shown.length > 0 ? (
+        <View style={styles.list}>
+          {shown.map((plant) => (
+            <RecordCard
+              key={plant.id}
+              plant={plant}
+              species={speciesById.get(plant.species_id)}
+              now={now}
+              onPress={() => openRecord(plant)}
+            />
           ))}
         </View>
-      ) : null}
-
-      {hasQueue && (loading || error) ? (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Synced records</Text>
-          {loading ? (
-            <View style={styles.inlineStatus}>
-              <ActivityIndicator
-                color={theme.colors.primary}
-                accessibilityLabel="Loading plant records"
-              />
-              <Text style={styles.loadingText}>Loading your records…</Text>
-            </View>
-          ) : (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyText}>
-                {error.offline
-                  ? "Your synced records can't be loaded while you're offline."
-                  : error.message}
-              </Text>
-              <Button title="Try again" variant="secondary" onPress={() => loadRecords()} />
-            </View>
-          )}
-        </View>
-      ) : null}
-
-      {loading || error || (plants.length === 0 && hasQueue) ? null : plants.length === 0 ? (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>No plant records yet</Text>
-          <Text style={styles.emptyText}>
-            Your submitted plant records will appear here once you register a plant.
-          </Text>
-        </View>
-      ) : (
-        <View style={styles.list}>
-          {plants.map((plant) => {
-            const plantSpecies = getSpecies(plant)
-
-            return (
-              <PlantRecordCard
-                key={plant.id}
-                plant={plant}
-                species={plantSpecies}
-              />
-            )
-          })}
-        </View>
-      )}
-
-      {plants.length > 0 ? (
-        <Pressable style={styles.refreshButton} onPress={() => loadRecords()}>
-          <Text style={styles.refreshText}>Refresh Records</Text>
-        </Pressable>
       ) : null}
     </ScrollView>
   )
 }
 
-const QUEUE_STATUS_LABELS = {
-  pending: 'Waiting to sync',
-  syncing: 'Syncing…',
-  failed: "Couldn't sync",
-  synced: 'Synced',
+function byNewest(a, b) {
+  return new Date(b.recorded_at) - new Date(a.recorded_at)
 }
 
-const QUEUE_STATUS_COLORS = {
-  pending: theme.colors.alert,
-  syncing: theme.colors.primary,
-  failed: theme.colors.error,
-  synced: theme.colors.success,
+// A synced queue row in the shape of a server plant row, with the species names it was saved with
+function queuedRecordAsPlant(record) {
+  return {
+    id: record.id,
+    qr_code: record.qr_code,
+    species_id: record.species_id,
+    review_status: 'pending_review',
+    recorded_at: record.recorded_at,
+    latitude: record.latitude,
+    longitude: record.longitude,
+    location_description: record.location_description,
+    height_cm: record.height_cm,
+    morphological_notes: record.morphological_notes,
+    photo_url: record.uploaded_photo_path,
+    species_scientific_name: record.species_scientific_name,
+    species_common_name: record.species_common_name,
+  }
 }
 
-// A record from the phone's queue. Failed records get Try again and Discard.
-function QueuedRecordCard({ record, busy = false, onRetry, onDiscard }) {
+// One saved record: thumbnail, species, status, QR code and when it was recorded. Opens the
+// record's detail screen.
+function RecordCard({ plant, species, now, onPress }) {
+  const scientificName = species?.scientific_name ?? plant.species_scientific_name
+  const commonName = species?.common_name ?? plant.species_common_name
+  const ago = formatRelativeTime(plant.recorded_at, now)
+
   return (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <View style={styles.speciesContainer}>
-          <ScientificName style={styles.queuedScientificName}>
-            {record.species_scientific_name}
-          </ScientificName>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityHint="Opens the record"
+      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+    >
+      <PlantThumbnail photoPath={plant.photo_url} />
+      <View style={styles.cardText}>
+        {scientificName ? (
+          <ScientificName style={styles.scientificName}>{scientificName}</ScientificName>
+        ) : (
+          <Text style={[styles.scientificName, styles.unknown]}>Unknown species</Text>
+        )}
+        {commonName ? <Text style={styles.commonName}>{commonName}</Text> : null}
+        <View style={styles.meta}>
+          <ReviewStatusChip status={plant.review_status} />
+          <Text style={styles.metaText} selectable>
+            {plant.qr_code}
+          </Text>
+        </View>
+        {/* On its own line on every card, so the cards line up */}
+        <Text style={styles.metaText}>{ago}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={theme.colors.textSecondary} />
+    </Pressable>
+  )
+}
+
+// A record still on the phone. It has no QR code or review status yet, so it shows its sync state
+// instead; one that couldn't sync gets the reason with Try again and Discard.
+function QueuedRecordCard({ record, now, busy, onRetry, onDiscard }) {
+  const failed = record.status === 'failed'
+
+  return (
+    <View style={styles.queuedCard}>
+      <View style={styles.queuedRow}>
+        <PlantThumbnail uri={queuedPhotoUri(record.local_photo_path)} />
+        <View style={styles.cardText}>
+          <ScientificName style={styles.scientificName}>{record.species_scientific_name}</ScientificName>
           {record.species_common_name ? (
             <Text style={styles.commonName}>{record.species_common_name}</Text>
           ) : null}
+          <View style={styles.meta}>
+            <SyncChip status={record.status} />
+          </View>
+          <Text style={styles.metaText}>{formatRelativeTime(record.recorded_at, now)}</Text>
         </View>
-
-        <Text style={[styles.statusText, { color: QUEUE_STATUS_COLORS[record.status] }]}>
-          {QUEUE_STATUS_LABELS[record.status]}
-        </Text>
       </View>
-
-      <View style={styles.divider} />
-
-      <View style={styles.details}>
-        {record.height_cm != null ? (
-          <DetailRow label="Height" value={`${record.height_cm} cm`} />
-        ) : null}
-        {record.location_description ? (
-          <DetailRow label="Location" value={record.location_description} />
-        ) : null}
-        {/* With the time, so two records of the same species can be told apart */}
-        <DetailRow label="Recorded" value={formatDateTime(record.recorded_at)} />
-        {record.status === 'synced' ? (
-          <DetailRow label="QR Code" value={record.qr_code} selectable />
-        ) : null}
-        {/* Synced records no longer have the copy on the phone, only the uploaded path */}
-        {record.local_photo_path || record.uploaded_photo_path ? (
-          <Text style={styles.photoAttached}>Photo attached</Text>
-        ) : null}
-      </View>
-
-      {record.morphological_notes ? (
-        <View style={styles.notes}>
-          <Text style={styles.notesLabel}>Notes</Text>
-          <Text style={styles.notesText}>{record.morphological_notes}</Text>
-        </View>
-      ) : null}
-
-      {record.status === 'failed' ? (
+      {failed ? (
         <>
-          <View style={styles.rejection}>
-            <Text style={styles.rejectionText}>{record.error_message}</Text>
+          <View style={styles.failure}>
+            <Text style={styles.failureText}>{record.error_message}</Text>
           </View>
           <View style={styles.queueActions}>
             <View style={styles.queueAction}>
@@ -351,473 +403,170 @@ function QueuedRecordCard({ record, busy = false, onRetry, onDiscard }) {
   )
 }
 
-function PlantRecordPhoto({ photoPath }) {
-  const { getPlantPhotoUrl } = usePlantPhoto()
-  const [photoUrl, setPhotoUrl] = useState(null)
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function loadPhoto() {
-      if (!photoPath) return
-
-      const result = await getPlantPhotoUrl(photoPath)
-
-      if (!cancelled && !result.error) {
-        setPhotoUrl(result.data)
-      }
-    }
-
-    loadPhoto()
-
-    return () => {
-      cancelled = true
-    }
-  }, [photoPath])
-
-  if (!photoUrl) return null
-
-  return (
-    <Image
-      source={{ uri: photoUrl }}
-      style={styles.plantPhoto}
-      resizeMode="cover"
-      accessibilityLabel="Plant record photo"
-    />
-  )
+const SYNC_CHIP_LABELS = {
+  pending: 'Waiting to sync',
+  syncing: 'Syncing…',
+  failed: "Couldn't sync",
 }
 
-function PlantRecordCard({ plant, species }) {
-  const status = getStatusInfo(plant.review_status)
-
+// In place of the review status chip on a record still on the phone
+function SyncChip({ status }) {
+  const failed = status === 'failed'
   return (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <View style={styles.speciesContainer}>
-          <Text style={styles.scientificName}>
-            {species?.scientific_name ?? 'Unknown species'}
-          </Text>
-
-          {species?.common_name ? (
-            <Text style={styles.commonName}>{species.common_name}</Text>
-          ) : null}
-        </View>
-
-        <View style={[styles.statusBadge, { backgroundColor: status.backgroundColor }]}>
-          <Text style={[styles.statusText, { color: status.color }]}>
-            {status.label}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.divider} />
-
-      <View style={styles.details}>
-        {plant.height_cm != null ? (
-          <DetailRow
-            label="Height"
-            value={`${plant.height_cm} cm`}
-          />
-        ) : null}
-
-        {plant.location_description ? (
-          <DetailRow
-            label="Location"
-            value={plant.location_description}
-          />
-        ) : null}
-
-        <DetailRow
-          label="Recorded"
-          value={formatDateTime(plant.recorded_at)}
-        />
-
-        <DetailRow
-          label="QR Code"
-          value={plant.qr_code}
-          selectable
-        />
-
-        {plant.photo_url ? (
-          <PlantRecordPhoto photoPath={plant.photo_url} />
-        ) : null}
-      </View>
-
-      {plant.morphological_notes ? (
-        <View style={styles.notes}>
-          <Text style={styles.notesLabel}>Notes</Text>
-          <Text style={styles.notesText}>{plant.morphological_notes}</Text>
-        </View>
-      ) : null}
-
-      {plant.review_status === 'rejected' && plant.rejection_reason ? (
-        <View style={styles.rejection}>
-          <Text style={styles.rejectionLabel}>Rejection reason</Text>
-          <Text style={styles.rejectionText}>{plant.rejection_reason}</Text>
-        </View>
-      ) : null}
-    </View>
-  )
-}
-
-function DetailRow({ label, value, selectable = false }) {
-  return (
-    <View style={styles.detailRow}>
-      <Text style={styles.detailLabel}>{label}</Text>
-      <Text
-        style={styles.detailValue}
-        selectable={selectable}
-      >
-        {value}
+    <View style={[styles.syncChip, failed && styles.syncChipFailed]}>
+      <Ionicons
+        name={failed ? 'alert-circle-outline' : 'cloud-upload-outline'}
+        size={14}
+        color={failed ? theme.colors.surfaceWhite : theme.colors.textPrimary}
+        accessibilityElementsHidden
+      />
+      <Text style={[styles.syncChipText, failed && styles.syncChipTextFailed]}>
+        {SYNC_CHIP_LABELS[status] ?? SYNC_CHIP_LABELS.pending}
       </Text>
     </View>
   )
 }
 
-function getStatusInfo(status) {
-  switch (status) {
-    case 'approved':
-      return {
-        label: 'Approved',
-        color: theme.colors.success,
-        // backgroundColor: '#E8F0E4',
-      }
-
-    case 'rejected':
-      return {
-        label: 'Rejected',
-        color: theme.colors.error,
-        // backgroundColor: '#F8E7E5',
-      }
-
-    case 'pending_review':
-    default:
-      return {
-        label: 'Pending Review',
-        color: theme.colors.alert,
-        // backgroundColor: '#F8EEDC',
-      }
+// The copy of the photo saved with a queued record, or undefined when there is none
+function queuedPhotoUri(relativePath) {
+  if (!relativePath) return undefined
+  try {
+    return getQueuedPhoto(relativePath).uri
+  } catch {
+    return undefined
   }
-}
-
-function formatDate(date) {
-  if (!date) return 'Not available'
-
-  const parsedDate = new Date(date)
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return 'Not available'
-  }
-
-  return parsedDate.toLocaleDateString('en-MY', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
-}
-
-// e.g. "15 Oct 2026, 6:45 pm". The time is built by hand rather than with toLocaleTimeString,
-// whose output (24-hour clock, "PM" or "p.m.") differs between Android and iOS.
-function formatDateTime(date) {
-  const day = formatDate(date)
-  if (day === 'Not available') return day
-
-  const parsedDate = new Date(date)
-  const hours = parsedDate.getHours()
-  const minutes = String(parsedDate.getMinutes()).padStart(2, '0')
-  return `${day}, ${hours % 12 || 12}:${minutes} ${hours < 12 ? 'am' : 'pm'}`
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: theme.colors.surface,
+  },
   container: {
     padding: theme.spacing.lg,
-    paddingBottom: theme.spacing.xxl,
+    paddingBottom: theme.spacing.xxxl,
     gap: theme.spacing.lg,
   },
-
-  header: {
-    gap: theme.spacing.xs,
+  pressed: {
+    opacity: 0.8,
   },
-
-  title: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: theme.typography.heading1.fontSize,
-    fontWeight: theme.typography.heading1.fontWeight,
-    color: theme.colors.textPrimary,
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.spacing.sm,
   },
-
-  subtitle: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: theme.typography.bodySmall.fontSize,
-    fontWeight: theme.typography.bodySmall.fontWeight,
-    lineHeight: 20,
-    color: theme.colors.textSecondary,
-  },
-
-  list: {
-    gap: theme.spacing.lg,
-  },
-
   section: {
     gap: theme.spacing.md,
   },
-
   sectionTitle: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: theme.typography.heading3.fontSize,
-    fontWeight: theme.typography.heading3.fontWeight,
-    color: theme.colors.textPrimary,
-  },
-
-  queuedScientificName: {
+    fontFamily: 'Inter_600SemiBold',
     fontSize: theme.typography.heading3.fontSize,
     color: theme.colors.textPrimary,
   },
-
-  photoAttached: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: theme.typography.caption.fontSize,
-    fontWeight: theme.typography.caption.fontWeight,
-    color: theme.colors.textSecondary,
-  },
-
-  queueActions: {
-    flexDirection: 'row',
-    gap: theme.spacing.md,
-  },
-
-  queueAction: {
-    flex: 1,
-  },
-
-  syncMessage: {
+  note: {
     fontFamily: 'Inter_400Regular',
     fontSize: theme.typography.bodySmall.fontSize,
+    lineHeight: 20,
     color: theme.colors.textSecondary,
   },
-
-  inlineStatus: {
+  errorNote: {
+    gap: theme.spacing.md,
+  },
+  list: {
+    gap: theme.spacing.md,
+  },
+  card: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: theme.spacing.sm,
-  },
-
-  card: {
-    padding: theme.spacing.lg,
+    gap: theme.spacing.md,
+    padding: theme.spacing.md,
     backgroundColor: theme.colors.surfaceWhite,
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.radius,
-    gap: theme.spacing.md,
   },
-
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: theme.spacing.md,
-  },
-
-  speciesContainer: {
+  cardText: {
     flex: 1,
     gap: theme.spacing.xs,
   },
-
   scientificName: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: theme.typography.heading3.fontSize,
-    fontWeight: theme.typography.heading3.fontWeight,
+    fontSize: theme.typography.body.fontSize,
     color: theme.colors.textPrimary,
   },
-
+  unknown: {
+    fontFamily: 'Inter_400Regular',
+  },
   commonName: {
     fontFamily: 'Inter_400Regular',
     fontSize: theme.typography.bodySmall.fontSize,
-    fontWeight: theme.typography.bodySmall.fontWeight,
     color: theme.colors.textSecondary,
   },
-
-  statusBadge: {
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: theme.spacing.xs,
-    borderRadius: theme.radius,
-  },
-
-  statusText: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: theme.typography.caption.fontSize,
-    fontWeight: '500',
-  },
-
-  divider: {
-    height: 1,
-    backgroundColor: theme.colors.border,
-  },
-
-  details: {
+  meta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
     gap: theme.spacing.sm,
+    marginTop: theme.spacing.xs,
   },
-
-  detailRow: {
-    gap: theme.spacing.xs,
-  },
-
-  detailLabel: {
+  metaText: {
     fontFamily: 'Inter_400Regular',
     fontSize: theme.typography.caption.fontSize,
-    fontWeight: theme.typography.caption.fontWeight,
     color: theme.colors.textSecondary,
   },
-
-  detailValue: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: theme.typography.bodySmall.fontSize,
-    fontWeight: theme.typography.bodySmall.fontWeight,
-    color: theme.colors.textPrimary,
-  },
-
-  notes: {
+  queuedCard: {
+    gap: theme.spacing.md,
     padding: theme.spacing.md,
-    backgroundColor: theme.colors.surface,
+    backgroundColor: theme.colors.surfaceWhite,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
     borderRadius: theme.radius,
-    gap: theme.spacing.xs,
   },
-
-  notesLabel: {
+  queuedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.md,
+  },
+  syncChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.xs,
+    borderRadius: theme.radius * 2,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  syncChipFailed: {
+    backgroundColor: theme.colors.error,
+    borderColor: theme.colors.error,
+  },
+  syncChipText: {
     fontFamily: 'Inter_500Medium',
-    fontSize: theme.typography.bodySmall.fontSize,
-    fontWeight: theme.typography.bodySmall.fontWeight,
+    fontSize: theme.typography.caption.fontSize,
     color: theme.colors.textPrimary,
   },
-
-  notesText: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: theme.typography.bodySmall.fontSize,
-    fontWeight: theme.typography.bodySmall.fontWeight,
-    lineHeight: 20,
-    color: theme.colors.textSecondary,
+  syncChipTextFailed: {
+    color: theme.colors.surfaceWhite,
   },
-
-  rejection: {
+  failure: {
     padding: theme.spacing.md,
     backgroundColor: theme.colors.surface,
     borderRadius: theme.radius,
     borderLeftWidth: 3,
     borderLeftColor: theme.colors.error,
-    gap: theme.spacing.xs,
   },
-
-  rejectionLabel: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: theme.typography.bodySmall.fontSize,
-    fontWeight: theme.typography.bodySmall.fontWeight,
-    color: theme.colors.error,
-  },
-
-  rejectionText: {
+  failureText: {
     fontFamily: 'Inter_400Regular',
     fontSize: theme.typography.bodySmall.fontSize,
-    fontWeight: theme.typography.bodySmall.fontWeight,
     lineHeight: 20,
-    color: theme.colors.textSecondary,
-  },
-
-  emptyCard: {
-    padding: theme.spacing.xl,
-    alignItems: 'center',
-    backgroundColor: theme.colors.surfaceWhite,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius,
-    gap: theme.spacing.sm,
-  },
-
-  emptyTitle: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: theme.typography.heading3.fontSize,
-    fontWeight: theme.typography.heading3.fontWeight,
     color: theme.colors.textPrimary,
-    textAlign: 'center',
   },
-
-  emptyText: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: theme.typography.bodySmall.fontSize,
-    fontWeight: theme.typography.bodySmall.fontWeight,
-    lineHeight: 20,
-    color: theme.colors.textSecondary,
-    textAlign: 'center',
-  },
-
-  center: {
-    flex: 1,
-    padding: theme.spacing.xl,
-    alignItems: 'center',
-    justifyContent: 'center',
+  queueActions: {
+    flexDirection: 'row',
     gap: theme.spacing.md,
-    backgroundColor: theme.colors.surface,
   },
-
-  loadingText: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: theme.typography.bodySmall.fontSize,
-    fontWeight: theme.typography.bodySmall.fontWeight,
-    color: theme.colors.textSecondary,
-  },
-
-  errorTitle: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: theme.typography.heading3.fontSize,
-    fontWeight: theme.typography.heading3.fontWeight,
-    color: theme.colors.textPrimary,
-    textAlign: 'center',
-  },
-
-  errorText: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: theme.typography.bodySmall.fontSize,
-    fontWeight: theme.typography.bodySmall.fontWeight,
-    lineHeight: 20,
-    color: theme.colors.textSecondary,
-    textAlign: 'center',
-  },
-
-  retryButton: {
-    minHeight: theme.buttonHeight,
-    paddingHorizontal: theme.spacing.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: theme.radius,
-    backgroundColor: theme.colors.primary,
-  },
-
-  retryText: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: theme.typography.bodySmall.fontSize,
-    fontWeight: '500',
-    color: theme.colors.surfaceWhite,
-  },
-
-  refreshButton: {
-    minHeight: theme.buttonHeight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius,
-    backgroundColor: theme.colors.surfaceWhite,
-  },
-
-  refreshText: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: theme.typography.bodySmall.fontSize,
-    fontWeight: '500',
-    color: theme.colors.primary,
-  },
-
-  plantPhoto: {
-    width: '100%',
-    height: 220,
-    borderRadius: theme.radius,
-    backgroundColor: theme.colors.surface,
+  queueAction: {
+    flex: 1,
   },
 })

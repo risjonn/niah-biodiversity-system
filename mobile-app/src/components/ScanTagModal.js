@@ -5,13 +5,19 @@ import QrScanner from './QRScanner'
 import ReviewStatusChip from './ReviewStatusChip'
 import ScientificName from './ScientificName'
 import { usePlantLookup } from '../hooks/usePlantLookup'
+import { usePlants } from '../hooks/usePlants'
 import { useSpecies } from '../hooks/useSpecies'
 import { theme } from '../theme/theme'
 
 // Scan a tag as a signed-in botanist. Says whether the tag is already registered, and if so its
 // species and review status. Render it only while open, so its state starts fresh each time.
-export default function ScanTagModal({ onClose }) {
+// When the plant is the botanist's own and onViewRecord is given, the result has a "View record"
+// button that calls it with the full record.
+export default function ScanTagModal({ onClose, onViewRecord }) {
   const lookUp = usePlantLookup()
+  const { fetchPlant } = usePlants()
+  // The scanned plant's full row when it is the botanist's own, else null
+  const [ownPlant, setOwnPlant] = useState(null)
   const { fetchSpecies } = useSpecies()
   const [scanning, setScanning] = useState(true)
   // What the last scan found: { plant } or { message }; null while scanning
@@ -39,12 +45,17 @@ export default function ScanTagModal({ onClose }) {
     setScanning(false)
     setChecking(true)
     const found = await lookUp(data)
+    // fetchPlant only returns the botanist's own rows, so finding it says the plant is theirs.
+    // A failure just leaves the button out.
+    const own = found.plant && onViewRecord ? await fetchPlant(found.plant.id) : null
+    setOwnPlant(own?.data ?? null)
     setChecking(false)
     setResult(found)
   }
 
   function scanAnother() {
     setResult(null)
+    setOwnPlant(null)
     scanLockedRef.current = false
     setScanning(true)
   }
@@ -81,7 +92,10 @@ export default function ScanTagModal({ onClose }) {
             )}
           </View>
         ) : null}
-        {result ? <Button title="Scan another" onPress={scanAnother} /> : null}
+        {ownPlant ? <Button title="View record" onPress={() => onViewRecord(ownPlant)} /> : null}
+        {result ? (
+          <Button title="Scan another" variant={ownPlant ? 'secondary' : 'primary'} onPress={scanAnother} />
+        ) : null}
         <Button title="Close" variant="secondary" onPress={onClose} />
       </View>
     </Modal>

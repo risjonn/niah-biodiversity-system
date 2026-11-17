@@ -85,11 +85,22 @@ export function usePlants() {
       .order('recorded_at', { ascending: false })
 
     if (error) return { data: [], ...plantError(error) }
+    lastLoadedMyPlants = { userId, plants: data }
     return { data, error: null }
   }
 
-  return { submitPlant, fetchPlant, fetchMyPlants }
+  // The signed-in user's records from the last fetchMyPlants this session (Home and Records load
+  // them), or null if they haven't loaded yet. No request: for screens that can show extra detail
+  // from records already on the phone but shouldn't load them just for that.
+  function getLoadedMyPlants() {
+    return userId && lastLoadedMyPlants?.userId === userId ? lastLoadedMyPlants.plants : null
+  }
+
+  return { submitPlant, fetchPlant, fetchMyPlants, getLoadedMyPlants }
 }
+
+// Kept with the user it belongs to, so it never shows one user's records to the next
+let lastLoadedMyPlants = null
 
 function plantError(error) {
   const alreadySaved = error.code === '23505' && /plants_pkey/.test(error.message ?? '')
