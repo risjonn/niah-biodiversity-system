@@ -1,5 +1,10 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react'
-import { Alert, Snackbar } from '@mui/material'
+import { Alert, Snackbar, useMediaQuery } from '@mui/material'
+
+// Bottom right, clear of the sidebar's user card in the bottom left. Below sm, panels and dialogs
+// are full width with their actions along the bottom, so toasts go to the top centre instead.
+const WIDE_ANCHOR = { vertical: 'bottom', horizontal: 'right' }
+const NARROW_ANCHOR = { vertical: 'top', horizontal: 'center' }
 
 const ToastContext = createContext(null)
 
@@ -10,6 +15,7 @@ const ToastContext = createContext(null)
 export function ToastProvider({ children }) {
   // The message stays set while the snackbar fades out, so only `open` is cleared on close
   const [toast, setToast] = useState({ open: false })
+  const isNarrow = useMediaQuery((theme) => theme.breakpoints.down('sm'))
 
   // A new key per message restarts the auto-hide timer when one message replaces another
   const show = useCallback((severity, message) => {
@@ -31,12 +37,11 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      {/* Bottom right, clear of the sidebar's user card in the bottom left */}
       <Snackbar
         key={toast.key}
         open={toast.open}
         autoHideDuration={5000}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        anchorOrigin={isNarrow ? NARROW_ANCHOR : WIDE_ANCHOR}
         onClose={(_event, reason) => {
           if (reason !== 'clickaway') close()
         }}

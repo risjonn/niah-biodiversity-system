@@ -1,15 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Alert,
   Box,
   Button,
+  Card,
+  CardActionArea,
+  CardContent,
   Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
+  Grid,
   Link,
+  MenuItem,
   Paper,
+  Skeleton,
   Stack,
   Table,
   TableBody,
@@ -18,19 +20,48 @@ import {
   TableHead,
   TableRow,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from '@mui/material'
+import GridViewOutlinedIcon from '@mui/icons-material/GridViewOutlined'
+import ViewListOutlinedIcon from '@mui/icons-material/ViewListOutlined'
 import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
-import PlantPhoto from '../components/PlantPhoto'
+import { NoPhoto } from '../components/PlantPhoto'
+import RelativeTime from '../components/RelativeTime'
+import ReviewPanel from '../components/ReviewPanel'
 import TableSkeleton from '../components/TableSkeleton'
 import { useNavCounts } from '../context/NavCountsContext'
 import { useToast } from '../context/ToastContext'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { usePlants } from '../hooks/usePlants'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
 import { formatDateTime } from '../lib/formatDateTime'
 import { mapUrl } from '../lib/mapUrl'
 import { formatCoordinates, formatHeight } from '../lib/plantFormat'
+
+const VIEW_STORAGE_KEY = 'niah.reviewView'
+const VIEWS = ['cards', 'table']
+
+// Remembered per browser. Storage can be unavailable (private windows, blocked site data), so
+// reading and writing fall back quietly to the cards.
+function readView() {
+  try {
+    const stored = localStorage.getItem(VIEW_STORAGE_KEY)
+    return VIEWS.includes(stored) ? stored : 'cards'
+  } catch {
+    return 'cards'
+  }
+}
+
+function writeView(view) {
+  try {
+    localStorage.setItem(VIEW_STORAGE_KEY, view)
+  } catch {
+    // Not remembered this time; the toggle still works
+  }
+}
 
 // Hidden at tablet width and below, where the table runs out of room
 const HEIGHT_COLUMN_SX = { display: { xs: 'none', lg: 'table-cell' } }
@@ -45,60 +76,125 @@ const COLUMNS = [
   'Actions',
 ]
 
+// The species filter, QR search and sort, applied to the queue in the browser (fetchPendingPlants
+// already returns every pending record the user can review). Oldest first by default, so the
+// records that have waited longest come first.
+function applyFilters(plants, { speciesId, search, sort }) {
+  const term = search.trim().toUpperCase()
+  return plants
+    .filter((plant) => !speciesId || plant.species_id === speciesId)
+    .filter((plant) => !term || plant.qr_code.toUpperCase().includes(term))
+    .sort((a, b) => {
+      const difference = new Date(a.recorded_at) - new Date(b.recorded_at)
+      return sort === 'newest' ? -difference : difference
+    })
+}
+
 export default function PlantReview() {
-  const { fetchPendingPlants, reviewPlant } = usePlants()
+  const { fetchPendingPlants, getPlantPhotoUrls, reviewPlant } = usePlants()
   const toast = useToast()
   const { refreshCounts } = useNavCounts()
+  // { data, error, loadedAt }: the queue, and when it was loaded (the "now" for relative times)
   const [result, setResult] = useState(null)
-  // Ids of records with a review request running, so their buttons can't be pressed twice
-  const [busyIds, setBusyIds] = useState(() => new Set())
-  // Dialogs hold an id rather than the record, so they close by themselves once it is reviewed
-  const [detailId, setDetailId] = useState(null)
-  const [rejectId, setRejectId] = useState(null)
+  // Signed URLs for the queue's photos, by storage path (one request for the whole queue)
+  const [photoUrls, setPhotoUrls] = useState(null)
+  const [view, setView] = useState(readView)
+  const [speciesId, setSpeciesId] = useState('')
+  const [search, setSearch] = useState('')
+  const debouncedSearch = useDebouncedValue(search)
+  const [sort, setSort] = useState('oldest')
+  // The review panel: open, and the record it shows (null when none are left)
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [openId, setOpenId] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  // Loads the queue and then signs its photos in one go. Resolves to the new queue. State is only
+  // set in the .then callbacks, never synchronously, so it can be called straight from an effect
+  // (the same approach as the sensors page).
+  const loadQueue = useCallback(
+    () =>
+      fetchPendingPlants().then((nextResult) => {
+        setResult({ ...nextResult, loadedAt: Date.now() })
+        return getPlantPhotoUrls(nextResult.data.map((plant) => plant.photo_url)).then((photos) => {
+          setPhotoUrls((current) => ({ ...current, ...photos.data }))
+          return nextResult
+        })
+      }),
+    [fetchPendingPlants, getPlantPhotoUrls],
+  )
 
   useEffect(() => {
-    let cancelled = false
-    fetchPendingPlants().then((nextResult) => {
-      if (!cancelled) setResult(nextResult)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [fetchPendingPlants])
+    loadQueue()
+  }, [loadQueue])
 
-  // The user's own records aren't in the list at all (see fetchPendingPlants)
   const plants = result?.data ?? []
-  const detailPlant = plants.find((plant) => plant.id === detailId) ?? null
-  const rejectPlant = plants.find((plant) => plant.id === rejectId) ?? null
+  const filters = { speciesId, search: debouncedSearch, sort }
+  const visible = applyFilters(plants, filters)
+  const index = visible.findIndex((plant) => plant.id === openId)
+  const current = index === -1 ? null : visible[index]
+  const hasFilters = Boolean(speciesId || search.trim())
 
-  // Resolves to true once the record is reviewed and removed from the list
-  async function handleReview(plant, status, rejectionReason) {
-    if (busyIds.has(plant.id)) return false
+  // Species in the queue, for the filter, by scientific name
+  const speciesOptions = [...new Map(plants.filter((p) => p.species).map((p) => [p.species.id, p.species])).values()]
+    .sort((a, b) => a.scientific_name.localeCompare(b.scientific_name))
 
-    setBusyIds((ids) => new Set(ids).add(plant.id))
+  function changeView(_event, next) {
+    if (!next) return
+    setView(next)
+    writeView(next)
+  }
+
+  function openPanel(plant) {
+    setOpenId(plant.id)
+    setPanelOpen(true)
+  }
+
+  function closePanel() {
+    setPanelOpen(false)
+    setOpenId(null)
+  }
+
+  // After a decision: the record that now sits where this one was, or the first left (the list
+  // wraps round, so skipped records come back), or nothing ("All caught up")
+  function nextAfterRemoving(list, removedId, atIndex) {
+    const remaining = list.filter((plant) => plant.id !== removedId)
+    return remaining[atIndex]?.id ?? remaining[0]?.id ?? null
+  }
+
+  async function decide(status, rejectionReason) {
+    const plant = current
+    if (!plant || busy) return
+
+    setBusy(true)
     const { error } = await reviewPlant(plant.id, { status, rejectionReason })
-    setBusyIds((ids) => {
-      const next = new Set(ids)
-      next.delete(plant.id)
-      return next
-    })
 
     if (error) {
+      // Most often someone else reviewed it first. Show why, reload the queue, and move on if
+      // this record has gone from it; if it's still waiting (e.g. the connection dropped), stay.
       toast.error(error)
-      return false
+      const refreshed = await loadQueue()
+      if (!refreshed.error && !refreshed.data.some((pending) => pending.id === plant.id)) {
+        setOpenId(nextAfterRemoving(applyFilters(refreshed.data, filters), plant.id, index))
+      }
+      refreshCounts()
+      setBusy(false)
+      return
     }
-    setResult((current) => ({
-      ...current,
-      data: current.data.filter((pending) => pending.id !== plant.id),
+
+    setResult((currentResult) => ({
+      ...currentResult,
+      data: currentResult.data.filter((pending) => pending.id !== plant.id),
     }))
+    setOpenId(nextAfterRemoving(visible, plant.id, index))
     toast.success(`${status === 'approved' ? 'Approved' : 'Rejected'} ${plant.qr_code}`)
     // One fewer pending review on the sidebar badge
     refreshCounts()
-    return true
+    setBusy(false)
   }
 
-  async function handleConfirmReject(reason) {
-    if (await handleReview(rejectPlant, 'rejected', reason)) setRejectId(null)
+  // Skip leaves the record waiting and goes to the next one, round to the start at the end
+  function skip() {
+    setOpenId(visible[index + 1]?.id ?? visible[0]?.id ?? null)
   }
 
   return (
@@ -115,18 +211,112 @@ export default function PlantReview() {
               : null
           }
         />
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="textSecondary">
           Your own records are reviewed by another officer.
         </Typography>
       </Stack>
 
-      {!result ? <TableSkeleton columns={COLUMNS} label="Loading records" /> : null}
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Stack
+          direction={{ xs: 'column', md: 'row' }}
+          spacing={2}
+          useFlexGap
+          sx={{ alignItems: { md: 'center' } }}
+        >
+          <TextField
+            select
+            label="Species"
+            value={speciesId}
+            onChange={(event) => setSpeciesId(event.target.value)}
+            sx={{ flex: { md: 2 }, minWidth: 0 }}
+          >
+            <MenuItem value="">All species</MenuItem>
+            {speciesOptions.map((species) => (
+              <MenuItem key={species.id} value={species.id}>
+                <Box component="span" sx={{ fontStyle: 'italic' }}>
+                  {species.scientific_name}
+                </Box>
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            label="QR code"
+            placeholder="e.g. NIAH-3FA9"
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            sx={{ flex: { md: 2 }, minWidth: 0 }}
+          />
+          <TextField
+            select
+            label="Sort"
+            value={sort}
+            onChange={(event) => setSort(event.target.value)}
+            sx={{ flex: { md: 1.5 }, minWidth: 0 }}
+          >
+            <MenuItem value="oldest">Oldest first</MenuItem>
+            <MenuItem value="newest">Newest first</MenuItem>
+          </TextField>
+          <Stack direction="row" spacing={2} sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+            <Typography variant="body2" color="textSecondary" sx={{ whiteSpace: 'nowrap' }} aria-live="polite">
+              {result && !result.error
+                ? hasFilters
+                  ? `${visible.length} of ${plants.length}`
+                  : `${plants.length} ${plants.length === 1 ? 'record' : 'records'}`
+                : null}
+            </Typography>
+            <ToggleButtonGroup value={view} exclusive onChange={changeView} size="small" aria-label="View">
+              <ToggleButton value="cards" aria-label="Cards">
+                <GridViewOutlinedIcon fontSize="small" />
+              </ToggleButton>
+              <ToggleButton value="table" aria-label="Table">
+                <ViewListOutlinedIcon fontSize="small" />
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Stack>
+        </Stack>
+      </Paper>
+
+      {!result ? (
+        view === 'cards' ? <CardsSkeleton /> : <TableSkeleton columns={COLUMNS} label="Loading records" />
+      ) : null}
       {result?.error ? <Alert severity="error">{result.error}</Alert> : null}
       {result && !result.error && plants.length === 0 ? (
         <EmptyState message="Nothing waiting for review" />
       ) : null}
+      {result && !result.error && plants.length > 0 && visible.length === 0 ? (
+        <EmptyState
+          message="No records match these filters"
+          action={
+            <Button
+              variant="outlined"
+              onClick={() => {
+                setSpeciesId('')
+                setSearch('')
+              }}
+            >
+              Clear filters
+            </Button>
+          }
+        />
+      ) : null}
 
-      {plants.length > 0 ? (
+      {visible.length > 0 && view === 'cards' ? (
+        <Grid container spacing={2}>
+          {visible.map((plant) => (
+            <Grid key={plant.id} size={{ xs: 12, sm: 6, md: 4 }}>
+              <ReviewCard
+                plant={plant}
+                photoUrl={photoUrls ? (photoUrls[plant.photo_url] ?? null) : undefined}
+                now={result.loadedAt}
+                onOpen={() => openPanel(plant)}
+              />
+            </Grid>
+          ))}
+        </Grid>
+      ) : null}
+
+      {visible.length > 0 && view === 'table' ? (
         <TableContainer component={Paper} variant="outlined">
           <Table>
             <TableHead>
@@ -143,41 +333,144 @@ export default function PlantReview() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {plants.map((plant) => (
-                <PendingRow key={plant.id} plant={plant} onOpen={() => setDetailId(plant.id)} />
+              {visible.map((plant) => (
+                <PendingRow key={plant.id} plant={plant} onOpen={() => openPanel(plant)} />
               ))}
             </TableBody>
           </Table>
         </TableContainer>
       ) : null}
 
-      <PlantDetailDialog
-        plant={detailPlant}
-        actions={
-          detailPlant ? (
-            <ReviewActions
-              busy={busyIds.has(detailPlant.id)}
-              onApprove={() => handleReview(detailPlant, 'approved')}
-              onReject={() => setRejectId(detailPlant.id)}
-            />
-          ) : null
-        }
-        onClose={() => setDetailId(null)}
-      />
-      {/* Keyed by record so the reason box starts empty for each one */}
-      <RejectDialog
-        key={rejectPlant?.id}
-        plant={rejectPlant}
-        busy={rejectPlant ? busyIds.has(rejectPlant.id) : false}
-        onConfirm={handleConfirmReject}
-        onClose={() => setRejectId(null)}
+      <ReviewPanel
+        open={panelOpen}
+        plant={current}
+        position={{ index, total: visible.length }}
+        now={result?.loadedAt ?? 0}
+        busy={busy}
+        onPrevious={index > 0 ? () => setOpenId(visible[index - 1].id) : null}
+        onNext={index !== -1 && index < visible.length - 1 ? () => setOpenId(visible[index + 1].id) : null}
+        onApprove={() => decide('approved')}
+        onReject={(reason) => decide('rejected', reason)}
+        onSkip={skip}
+        onClose={closePanel}
       />
     </Stack>
   )
 }
 
-// A click anywhere on the row opens the record. The Review button does the same and is how
-// keyboard users open it. Approving and rejecting only happen inside the dialog.
+// One pending record as a card. The whole card opens the review panel.
+// photoUrl: a signed URL, null when it couldn't be signed, or undefined while the URLs load.
+function ReviewCard({ plant, photoUrl, now, onOpen }) {
+  const species = plant.species
+
+  return (
+    <Card
+      variant="outlined"
+      sx={(theme) => ({
+        height: '100%',
+        transition: theme.transitions.create(['transform', 'box-shadow'], {
+          duration: theme.transitions.duration.shorter,
+        }),
+        '@media (hover: hover)': {
+          '&:hover': { transform: 'translateY(-2px)', boxShadow: theme.shadows[3] },
+        },
+        '@media (prefers-reduced-motion: reduce)': {
+          transition: 'none',
+          '&:hover': { transform: 'none' },
+        },
+      })}
+    >
+      <CardActionArea
+        onClick={onOpen}
+        sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}
+      >
+        <Box sx={{ aspectRatio: '4 / 3', bgcolor: 'background.default', overflow: 'hidden' }}>
+          <CardPhoto plant={plant} url={photoUrl} />
+        </Box>
+        <CardContent sx={{ flexGrow: 1 }}>
+          <Stack spacing={1}>
+            <Box>
+              <Typography variant="body1" component="h2" sx={{ fontStyle: 'italic', fontWeight: 600 }}>
+                {species?.scientific_name ?? 'Unknown species'}
+              </Typography>
+              {species?.common_name ? (
+                <Typography variant="body2" color="textSecondary">
+                  {species.common_name}
+                </Typography>
+              ) : null}
+            </Box>
+            <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+              {species ? (
+                <Chip
+                  size="small"
+                  label={conservationStatusLabels[species.conservation_status] ?? species.conservation_status}
+                  color={conservationStatusChipColor(species.conservation_status)}
+                />
+              ) : null}
+              <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                {plant.qr_code}
+              </Typography>
+            </Stack>
+            <Typography variant="body2" color="textSecondary" component="div">
+              Recorded <RelativeTime value={plant.recorded_at} now={now} longAges />
+            </Typography>
+            <Typography variant="body2" color="textSecondary" sx={{ overflowWrap: 'anywhere' }}>
+              {plant.location_description || formatCoordinates(plant)}
+            </Typography>
+            {plant.height_cm != null ? (
+              <Typography variant="body2" color="textSecondary">
+                Height {formatHeight(plant.height_cm)}
+              </Typography>
+            ) : null}
+          </Stack>
+        </CardContent>
+      </CardActionArea>
+    </Card>
+  )
+}
+
+function CardPhoto({ plant, url }) {
+  const [failed, setFailed] = useState(false)
+  if (plant.photo_url && url === undefined) {
+    return <Skeleton variant="rectangular" sx={{ width: '100%', height: '100%' }} />
+  }
+  if (!plant.photo_url || !url || failed) return <NoPhoto fill />
+  return (
+    <Box
+      component="img"
+      src={url}
+      alt={`Photo of ${plant.qr_code}`}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+    />
+  )
+}
+
+// Placeholder cards while the queue loads, in the same grid
+function CardsSkeleton() {
+  return (
+    <Box role="status" aria-label="Loading records">
+      <Grid container spacing={2} aria-hidden="true">
+        {Array.from({ length: 6 }, (_, index) => (
+          <Grid key={index} size={{ xs: 12, sm: 6, md: 4 }}>
+            <Card variant="outlined">
+              <Skeleton variant="rectangular" sx={{ aspectRatio: '4 / 3', height: 'auto' }} />
+              <CardContent>
+                <Skeleton width="70%" />
+                <Skeleton width="45%" />
+                <Skeleton width="55%" />
+              </CardContent>
+            </Card>
+          </Grid>
+        ))}
+      </Grid>
+    </Box>
+  )
+}
+
+// The table view (the previous layout). A click anywhere on the row opens the review panel; the
+// Review button does the same and is how keyboard users open it.
 function PendingRow({ plant, onOpen }) {
   return (
     <TableRow hover onClick={onOpen} sx={{ cursor: 'pointer' }}>
@@ -189,11 +482,21 @@ function PendingRow({ plant, onOpen }) {
       <TableCell>
         <Typography variant="body2">{formatCoordinates(plant)}</Typography>
         {plant.location_description ? (
-          <Typography variant="caption" component="div" color="text.secondary">
+          <Typography variant="caption" component="div" color="textSecondary">
             {plant.location_description}
           </Typography>
         ) : null}
-        <MapLink plant={plant} />
+        <Link
+          href={mapUrl(plant.latitude, plant.longitude)}
+          target="_blank"
+          rel="noopener noreferrer"
+          variant="body2"
+          // Following the link shouldn't also open the record
+          onClick={(event) => event.stopPropagation()}
+          sx={{ display: 'block' }}
+        >
+          Open in map
+        </Link>
       </TableCell>
       <TableCell sx={HEIGHT_COLUMN_SX}>{formatHeight(plant.height_cm)}</TableCell>
       <TableCell>
@@ -212,163 +515,10 @@ function PendingRow({ plant, onOpen }) {
   )
 }
 
-// Opens the record's coordinates in Google Maps in a new tab, like the sensor page
-function MapLink({ plant }) {
-  return (
-    <Link
-      href={mapUrl(plant.latitude, plant.longitude)}
-      target="_blank"
-      rel="noopener noreferrer"
-      variant="body2"
-      // Following the link shouldn't also open the record
-      onClick={(event) => event.stopPropagation()}
-      sx={{ display: 'block' }}
-    >
-      Open in map
-    </Link>
-  )
-}
-
-function ReviewActions({ busy, onApprove, onReject }) {
-  return (
-    <Stack direction="row" spacing={1}>
-      <Button variant="contained" color="success" loading={busy} onClick={onApprove}>
-        Approve
-      </Button>
-      <Button variant="outlined" color="error" disabled={busy} onClick={onReject}>
-        Reject
-      </Button>
-    </Stack>
-  )
-}
-
-// Photo on the left and details on the right from md up, stacked below that
-function PlantDetailDialog({ plant, actions, onClose }) {
-  return (
-    <Dialog open={Boolean(plant)} onClose={onClose} fullWidth maxWidth="md">
-      {plant ? (
-        <>
-          <DialogTitle>{plant.qr_code}</DialogTitle>
-          <DialogContent dividers>
-            <Stack direction={{ xs: 'column', md: 'row' }} spacing={3}>
-              <Box sx={{ flex: { md: 1 }, minWidth: 0 }}>
-                <PlantPhoto path={plant.photo_url} alt={`Photo of ${plant.qr_code}`} />
-              </Box>
-              <Stack spacing={2} sx={{ flex: { md: 1 }, minWidth: 0 }}>
-                <DetailField label="Species">
-                  <SpeciesName species={plant.species} />
-                  {plant.species ? (
-                    <Chip
-                      size="small"
-                      label={
-                        conservationStatusLabels[plant.species.conservation_status] ??
-                        plant.species.conservation_status
-                      }
-                      color={conservationStatusChipColor(plant.species.conservation_status)}
-                      sx={{ mt: 1 }}
-                    />
-                  ) : null}
-                </DetailField>
-                <DetailField label="Recorded">{formatDateTime(plant.recorded_at)}</DetailField>
-                <DetailField label="Synced">
-                  {plant.synced_at ? formatDateTime(plant.synced_at) : '—'}
-                </DetailField>
-                <DetailField label="Coordinates">
-                  {formatCoordinates(plant)}
-                  <MapLink plant={plant} />
-                </DetailField>
-                <DetailField label="Location description">
-                  {plant.location_description || '—'}
-                </DetailField>
-                <DetailField label="Height">{formatHeight(plant.height_cm)}</DetailField>
-                <DetailField label="Monitored">{plant.is_monitored ? 'Yes' : 'No'}</DetailField>
-                <DetailField label="Morphological notes">
-                  {plant.morphological_notes || '—'}
-                </DetailField>
-              </Stack>
-            </Stack>
-          </DialogContent>
-          <DialogActions sx={{ px: 3, py: 2, justifyContent: 'space-between' }}>
-            {actions}
-            <Button onClick={onClose}>Close</Button>
-          </DialogActions>
-        </>
-      ) : null}
-    </Dialog>
-  )
-}
-
-function DetailField({ label, children }) {
-  return (
-    <Stack spacing={0.5}>
-      <Typography variant="caption" color="text.secondary">
-        {label}
-      </Typography>
-      <Box sx={{ typography: 'body2', whiteSpace: 'pre-wrap' }}>{children}</Box>
-    </Stack>
-  )
-}
-
-// Asks for the reason before rejecting. Stays open if the request fails so the reason isn't lost;
-// the error is shown in the page's snackbar.
-function RejectDialog({ plant, busy, onConfirm, onClose }) {
-  const [reason, setReason] = useState('')
-  const canConfirm = reason.trim().length > 0
-
-  function handleSubmit(event) {
-    event.preventDefault()
-    if (canConfirm && !busy) onConfirm(reason)
-  }
-
-  return (
-    <Dialog
-      open={Boolean(plant)}
-      onClose={busy ? undefined : onClose}
-      fullWidth
-      maxWidth="sm"
-      slotProps={{ paper: { component: 'form', onSubmit: handleSubmit } }}
-    >
-      <DialogTitle>Reject {plant?.qr_code}</DialogTitle>
-      <DialogContent>
-        <Stack spacing={2} sx={{ pt: 1 }}>
-          <Typography variant="body2" color="text.secondary">
-            The botanist who recorded this plant will see this reason.
-          </Typography>
-          <TextField
-            label="Rejection reason"
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-            disabled={busy}
-            required
-            multiline
-            minRows={3}
-            autoFocus
-            fullWidth
-          />
-        </Stack>
-      </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={onClose} disabled={busy}>
-          Cancel
-        </Button>
-        <Button
-          type="submit"
-          variant="contained"
-          color="error"
-          loading={busy}
-          disabled={!canConfirm}
-        >
-          Reject record
-        </Button>
-      </DialogActions>
-    </Dialog>
-  )
-}
-
 function SpeciesName({ species }) {
   if (!species) {
     return (
-      <Typography variant="body2" color="text.secondary">
+      <Typography variant="body2" color="textSecondary">
         Unknown species
       </Typography>
     )
@@ -379,7 +529,7 @@ function SpeciesName({ species }) {
         {species.scientific_name}
       </Typography>
       {species.common_name ? (
-        <Typography variant="caption" component="div" color="text.secondary">
+        <Typography variant="caption" component="div" color="textSecondary">
           {species.common_name}
         </Typography>
       ) : null}

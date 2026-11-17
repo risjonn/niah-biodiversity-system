@@ -26,7 +26,7 @@ export default function ChartCard({
               {title}
             </Typography>
             {subtitle ? (
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" color="textSecondary">
                 {subtitle}
               </Typography>
             ) : null}
@@ -50,7 +50,7 @@ export default function ChartCard({
               </Alert>
             ) : null}
             {!loading && !error && empty ? (
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" color="textSecondary">
                 {emptyMessage}
               </Typography>
             ) : null}

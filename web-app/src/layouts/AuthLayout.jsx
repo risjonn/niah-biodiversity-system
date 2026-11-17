@@ -192,7 +192,7 @@ export default function AuthLayout() {
             display: none also hides the unused copy from screen readers, so only one is read. */}
         <Typography
           variant="body2"
-          color="text.secondary"
+          color="textSecondary"
           sx={{
             display: { xs: 'none', md: 'block' },
             maxWidth: CARD_MAX_WIDTH,
@@ -221,7 +221,7 @@ export default function AuthLayout() {
       >
         <Typography
           variant="body2"
-          color="text.secondary"
+          color="textSecondary"
           sx={{ display: { xs: 'block', md: 'none' }, mb: 1 }}
         >
           {GUEST_NOTE}
