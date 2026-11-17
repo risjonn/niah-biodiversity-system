@@ -1,6 +1,7 @@
 import { Link as RouterLink } from 'react-router-dom'
 import { Alert, Box, Card, CardActionArea, CardContent, Skeleton, Stack, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
+import TrendingUpIcon from '@mui/icons-material/TrendingUp'
 import { visuallyHidden } from '../lib/visuallyHidden'
 
 // One headline number: an icon in a tile of `color` (a theme palette name: primary, secondary,
@@ -8,6 +9,7 @@ import { visuallyHidden } from '../lib/visuallyHidden'
 // - loading: a skeleton in place of the value
 // - error: an inline error in place of the value
 // - to: the whole card links there and lifts slightly on hover
+// - trend: an optional short line under the value, e.g. "+5 this month", shown once it's loaded
 export default function StatCard({
   icon: Icon,
   color = 'primary',
@@ -15,6 +17,7 @@ export default function StatCard({
   value,
   caption,
   to,
+  trend,
   loading = false,
   error = null,
 }) {
@@ -54,6 +57,14 @@ export default function StatCard({
             <Typography variant="h1" component="p">
               {value}
             </Typography>
+          ) : null}
+          {!error && !loading && trend ? (
+            <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', color: 'success.main' }}>
+              <TrendingUpIcon fontSize="small" aria-hidden="true" />
+              <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                {trend}
+              </Typography>
+            </Stack>
           ) : null}
           {caption ? (
             <Typography variant="caption" color="textSecondary">
