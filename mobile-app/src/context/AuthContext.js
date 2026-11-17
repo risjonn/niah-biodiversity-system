@@ -11,7 +11,7 @@ import { supabase } from "../lib/supabaseClient";
 // Matches the user_role enum in database/schema/001_initial_schema.sql
 const ROLES = ["botanist", "conservation_officer", "admin"];
 
-// The last signed-in account and its role, so a botanist stays signed in when the app starts
+// The last signed-in account, its role and name, so a botanist stays signed in when the app starts
 // without a connection. Saved whenever the role loads and removed on sign-out.
 const SAVED_ACCOUNT_KEY = "niah-offline-account";
 
@@ -25,9 +25,10 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   // undefined until Supabase has finished restoring any saved session
   const [session, setSession] = useState(undefined);
-  // Kept with the user it was loaded for, so one user's role never carries over to the next
+  // { userId, role, fullName }, kept with the user it was loaded for, so one user's role and name
+  // never carry over to the next
   const [loadedRole, setLoadedRole] = useState(null);
-  // { user: { id, email }, role } from the phone, used when the app started offline and Supabase
+  // { user: { id, email }, role, fullName } from the phone, used when the app started offline and Supabase
   // couldn't refresh the saved session. Replaced by the real session once the phone reconnects.
   const [offlineAccount, setOfflineAccount] = useState(null);
   const [error, setError] = useState(null);
@@ -91,7 +92,7 @@ export function AuthProvider({ children }) {
     let cancelled = false;
     supabase
       .from("profiles")
-      .select("role")
+      .select("role, full_name")
       .eq("id", sessionUserId)
       .maybeSingle()
       .then(async ({ data, error: queryError }) => {
@@ -99,10 +100,11 @@ export function AuthProvider({ children }) {
 
         const role = ROLES.includes(data?.role) ? data.role : null;
         if (role) {
-          setLoadedRole({ userId: sessionUserId, role });
+          const fullName = data.full_name ?? null;
+          setLoadedRole({ userId: sessionUserId, role, fullName });
           setOfflineAccount(null);
           setError(null);
-          saveAccount({ userId: sessionUserId, email: sessionEmail, role });
+          saveAccount({ userId: sessionUserId, email: sessionEmail, role, fullName });
           return;
         }
 
@@ -112,7 +114,11 @@ export function AuthProvider({ children }) {
           const saved = await readSavedAccount();
           if (cancelled) return;
           if (saved?.userId === sessionUserId) {
-            setLoadedRole({ userId: sessionUserId, role: saved.role });
+            setLoadedRole({
+              userId: sessionUserId,
+              role: saved.role,
+              fullName: saved.fullName ?? null,
+            });
             setError(null);
             return;
           }
@@ -195,14 +201,18 @@ export function AuthProvider({ children }) {
   const roleLoaded =
     sessionUserId !== null && loadedRole?.userId === sessionUserId;
   // Also keeps the user where they are while the role is checked again after reconnecting
-  const offlineRole =
-    offlineAccount && offlineAccount.user.id === userId
-      ? offlineAccount.role
-      : null;
+  const offlineMatches = offlineAccount && offlineAccount.user.id === userId;
+  const offlineRole = offlineMatches ? offlineAccount.role : null;
 
   const value = {
     user,
     role: roleLoaded ? loadedRole.role : offlineRole,
+    // The profile's full name (e.g. for a greeting), or null when it has none or isn't known yet
+    fullName: roleLoaded
+      ? loadedRole.fullName
+      : offlineMatches
+        ? offlineAccount.fullName
+        : null,
     // True until we know whether anyone is signed in and, if so, what their role is
     isLoading:
       session === undefined || (userId !== null && !roleLoaded && !offlineRole),
@@ -233,7 +243,11 @@ async function restoreOfflineAccount() {
 
   const saved = await readSavedAccount();
   return saved
-    ? { user: { id: saved.userId, email: saved.email }, role: saved.role }
+    ? {
+        user: { id: saved.userId, email: saved.email },
+        role: saved.role,
+        fullName: saved.fullName ?? null,
+      }
     : null;
 }
 
