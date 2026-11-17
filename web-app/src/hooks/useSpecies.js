@@ -98,13 +98,12 @@ async function countSpeciesByConservationStatus() {
 }
 
 // All species, alphabetical by scientific name. `search` matches scientific name, common name or
-// family; `conservationStatus` is one of the conservation_status enum values.
-async function fetchSpecies({ search, conservationStatus } = {}) {
+// family. The species list filters by conservation status itself, so it can count each status.
+async function fetchSpecies({ search } = {}) {
   let query = supabase.from('species').select('*').order('scientific_name')
 
   const searchFilter = containsAnyFilter(SEARCH_COLUMNS, search)
   if (searchFilter) query = query.or(searchFilter)
-  if (conservationStatus) query = query.eq('conservation_status', conservationStatus)
 
   const { data, error } = await query
   if (error) return { data: [], error: speciesErrorMessage(error) }

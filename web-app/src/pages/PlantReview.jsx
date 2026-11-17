@@ -38,6 +38,7 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { usePlants } from '../hooks/usePlants'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
 import { formatDateTime } from '../lib/formatDateTime'
+import { hoverLiftSx } from '../lib/hoverLift'
 import { mapUrl } from '../lib/mapUrl'
 import { formatCoordinates, formatHeight } from '../lib/plantFormat'
 
@@ -366,19 +367,7 @@ function ReviewCard({ plant, photoUrl, now, onOpen }) {
   return (
     <Card
       variant="outlined"
-      sx={(theme) => ({
-        height: '100%',
-        transition: theme.transitions.create(['transform', 'box-shadow'], {
-          duration: theme.transitions.duration.shorter,
-        }),
-        '@media (hover: hover)': {
-          '&:hover': { transform: 'translateY(-2px)', boxShadow: theme.shadows[3] },
-        },
-        '@media (prefers-reduced-motion: reduce)': {
-          transition: 'none',
-          '&:hover': { transform: 'none' },
-        },
-      })}
+      sx={(theme) => ({ height: '100%', ...hoverLiftSx(theme) })}
     >
       <CardActionArea
         onClick={onOpen}

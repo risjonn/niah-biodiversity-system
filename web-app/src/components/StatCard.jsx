@@ -2,6 +2,7 @@ import { Link as RouterLink } from 'react-router-dom'
 import { Alert, Box, Card, CardActionArea, CardContent, Skeleton, Stack, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import TrendingUpIcon from '@mui/icons-material/TrendingUp'
+import { hoverLiftSx } from '../lib/hoverLift'
 import { visuallyHidden } from '../lib/visuallyHidden'
 
 // One headline number: an icon in a tile of `color` (a theme palette name: primary, secondary,
@@ -10,6 +11,8 @@ import { visuallyHidden } from '../lib/visuallyHidden'
 // - error: an inline error in place of the value
 // - to: the whole card links there and lifts slightly on hover
 // - trend: an optional short line under the value, e.g. "+5 this month", shown once it's loaded
+// - size: 'small' for a compact card (smaller tile and value), e.g. inside a page section
+// - labelComponent: the label's heading level, h2 by default; h3 under a section's h2
 export default function StatCard({
   icon: Icon,
   color = 'primary',
@@ -20,15 +23,21 @@ export default function StatCard({
   trend,
   loading = false,
   error = null,
+  size = 'medium',
+  labelComponent = 'h2',
 }) {
+  const isSmall = size === 'small'
+  const tileSize = isSmall ? 36 : 44
+  const valueVariant = isSmall ? 'h2' : 'h1'
+
   const content = (
     <CardContent sx={{ height: '100%' }}>
       <Stack direction="row" spacing={2} sx={{ alignItems: 'flex-start' }}>
         <Box
           sx={(theme) => ({
             flexShrink: 0,
-            width: 44,
-            height: 44,
+            width: tileSize,
+            height: tileSize,
             borderRadius: 1,
             display: 'flex',
             alignItems: 'center',
@@ -38,15 +47,15 @@ export default function StatCard({
             color: theme.palette[color].dark,
           })}
         >
-          <Icon aria-hidden="true" />
+          <Icon aria-hidden="true" fontSize={isSmall ? 'small' : 'medium'} />
         </Box>
         <Stack spacing={0.5} sx={{ minWidth: 0, flexGrow: 1 }}>
-          <Typography variant="body2" component="h2" color="textSecondary" sx={{ fontWeight: 500 }}>
+          <Typography variant="body2" component={labelComponent} color="textSecondary" sx={{ fontWeight: 500 }}>
             {label}
           </Typography>
           {error ? <Alert severity="error">{error}</Alert> : null}
           {!error && loading ? (
-            <Typography variant="h1" component="p">
+            <Typography variant={valueVariant} component="p">
               <Skeleton width="50%" aria-hidden="true" />
               <Box component="span" sx={visuallyHidden}>
                 Loading {label}
@@ -54,7 +63,7 @@ export default function StatCard({
             </Typography>
           ) : null}
           {!error && !loading ? (
-            <Typography variant="h1" component="p">
+            <Typography variant={valueVariant} component="p">
               {value}
             </Typography>
           ) : null}
@@ -79,21 +88,7 @@ export default function StatCard({
   return (
     <Card
       variant="outlined"
-      sx={(theme) => ({
-        height: '100%',
-        ...(to && {
-          transition: theme.transitions.create(['transform', 'box-shadow'], {
-            duration: theme.transitions.duration.shorter,
-          }),
-          '@media (hover: hover)': {
-            '&:hover': { transform: 'translateY(-2px)', boxShadow: theme.shadows[3] },
-          },
-          '@media (prefers-reduced-motion: reduce)': {
-            transition: 'none',
-            '&:hover': { transform: 'none' },
-          },
-        }),
-      })}
+      sx={(theme) => ({ height: '100%', ...(to && hoverLiftSx(theme)) })}
     >
       {to ? (
         <CardActionArea component={RouterLink} to={to} sx={{ height: '100%' }}>

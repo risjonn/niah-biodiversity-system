@@ -4,6 +4,7 @@ import {
   Alert,
   Box,
   Button,
+  ButtonBase,
   Chip,
   CircularProgress,
   Dialog,
@@ -11,6 +12,7 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  Grid,
   Link,
   Paper,
   Skeleton,
@@ -24,19 +26,37 @@ import {
   Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlined'
+import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined'
+import HighlightOffOutlinedIcon from '@mui/icons-material/HighlightOffOutlined'
+import OpenInFullOutlinedIcon from '@mui/icons-material/OpenInFullOutlined'
+import ChartCard from '../components/ChartCard'
 import EmptyState from '../components/EmptyState'
+import LeafPlaceholder from '../components/LeafPlaceholder'
 import PageHeader from '../components/PageHeader'
+import PhotoViewer from '../components/PhotoViewer'
 import PlantRecordPanel from '../components/PlantRecordPanel'
+import RecordsByMonthBars from '../components/RecordsByMonthBars'
+import StatCard from '../components/StatCard'
 import { useToast } from '../context/ToastContext'
 import { useSpecies } from '../hooks/useSpecies'
 import { usePlants } from '../hooks/usePlants'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
-import { formatDateTime } from '../lib/formatDateTime'
+import { formatDateTime, sarawakMonthKeyOf } from '../lib/formatDateTime'
+import { monthKeysBetween, monthKeysEndingAt, monthlyRowsFromPlants } from '../lib/recordMonths'
+import { formatMonth } from '../lib/reportExport'
 import { reviewStatusChipColors, reviewStatusLabels } from '../lib/reviewStatus'
 
 // The order the record counts are shown in on this page. Labels and colours are shared
 // (lib/reviewStatus.js).
 const REVIEW_STATUSES = ['pending_review', 'approved', 'rejected']
+
+// The icon on each count's card. Pending matches the dashboard's pending reviews card.
+const STATUS_ICONS = {
+  pending_review: FactCheckOutlinedIcon,
+  approved: CheckCircleOutlineIcon,
+  rejected: HighlightOffOutlinedIcon,
+}
 
 // Editing happens on SpeciesForm (/species/:id/edit); deleting is confirmed in a dialog here
 export default function SpeciesDetail() {
@@ -134,42 +154,45 @@ function SpeciesContent({ species, plants, plantsError, onRetry }) {
 
   return (
     <>
-      <PageHeader
-        title={
-          <Box component="span" sx={{ fontStyle: 'italic' }}>
-            {species.scientific_name}
-          </Box>
-        }
-        subtitle={species.common_name}
-        action={
-          <Stack direction="row" spacing={1}>
-            <Button component={RouterLink} to={`/species/${species.id}/edit`} variant="outlined">
-              Edit
-            </Button>
-            <Button variant="outlined" color="error" onClick={() => setIsDeleteOpen(true)}>
-              Delete
-            </Button>
-          </Stack>
-        }
-      />
-
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={3}>
+      {/* The photo beside the name, family and status; stacked on narrow screens */}
+      <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} sx={{ alignItems: { md: 'flex-start' } }}>
         {/* Keyed by the URL so a changed photo starts loading again */}
         <ReferencePhoto
           key={species.reference_photo_url ?? ''}
           url={species.reference_photo_url}
           alt={`Reference photo of ${species.scientific_name}`}
+          conservationStatus={status}
         />
-        <Stack spacing={1} sx={{ alignItems: 'flex-start' }}>
-          <Typography variant="body1" color="textSecondary">
-            {species.family ? `Family: ${species.family}` : 'Family not recorded yet'}
-          </Typography>
-          <Chip label={statusLabel} color={conservationStatusChipColor(status)} />
-          {species.updated_at ? (
-            <Typography variant="caption" color="textSecondary">
-              Last updated {formatDateTime(species.updated_at)}
+        <Stack spacing={2} sx={{ flexGrow: 1, minWidth: 0 }}>
+          <PageHeader
+            title={
+              <Box component="span" sx={{ fontStyle: 'italic' }}>
+                {species.scientific_name}
+              </Box>
+            }
+            subtitle={species.common_name}
+            action={
+              <Stack direction="row" spacing={1}>
+                <Button component={RouterLink} to={`/species/${species.id}/edit`} variant="outlined">
+                  Edit
+                </Button>
+                <Button variant="outlined" color="error" onClick={() => setIsDeleteOpen(true)}>
+                  Delete
+                </Button>
+              </Stack>
+            }
+          />
+          <Stack spacing={1} sx={{ alignItems: 'flex-start' }}>
+            <Typography variant="body1" color="textSecondary">
+              {species.family ? `Family: ${species.family}` : 'Family not recorded yet'}
             </Typography>
-          ) : null}
+            <Chip label={statusLabel} color={conservationStatusChipColor(status)} />
+            {species.updated_at ? (
+              <Typography variant="caption" color="textSecondary">
+                Last updated {formatDateTime(species.updated_at)}
+              </Typography>
+            ) : null}
+          </Stack>
         </Stack>
       </Stack>
 
@@ -281,16 +304,19 @@ function TextSection({ title, text }) {
   )
 }
 
-// reference_photo_url is a plain image URL for now, not a storage path
-function ReferencePhoto({ url, alt }) {
-  const [status, setStatus] = useState('loading')
+// reference_photo_url is a plain image URL for now, not a storage path. Once loaded, the photo
+// is a button that opens it full screen in the same viewer as Plant review. Without a photo (or
+// if it won't load) it is the gallery's leaf placeholder with a short note.
+function ReferencePhoto({ url, alt, conservationStatus }) {
+  const [status, setStatus] = useState(url ? 'loading' : 'none')
+  const [viewerOpen, setViewerOpen] = useState(false)
 
   return (
     <Box
       sx={{
         position: 'relative',
         flexShrink: 0,
-        width: { xs: '100%', md: 320 },
+        width: { xs: '100%', md: 400, lg: 480 },
         aspectRatio: '4 / 3',
         overflow: 'hidden',
         borderRadius: 1,
@@ -299,46 +325,81 @@ function ReferencePhoto({ url, alt }) {
         bgcolor: 'background.default',
       }}
     >
-      {url ? (
+      {status === 'loading' ? (
+        <Skeleton
+          variant="rectangular"
+          aria-label="Loading photo"
+          sx={{ position: 'absolute', inset: 0, height: '100%' }}
+        />
+      ) : null}
+      {status === 'none' || status === 'error' ? (
         <>
-          {status === 'loading' ? (
-            <Skeleton
-              variant="rectangular"
-              aria-label="Loading photo"
-              sx={{ position: 'absolute', inset: 0, height: '100%' }}
-            />
-          ) : null}
-          {status === 'error' ? (
-            <PhotoMessage>This photo could not be loaded.</PhotoMessage>
-          ) : null}
+          <LeafPlaceholder conservationStatus={conservationStatus} />
+          {/* Primary text: the secondary grey falls below AA (4.5:1) on the darker tints */}
+          <Typography
+            variant="caption"
+            color="textPrimary"
+            sx={{ position: 'absolute', left: 0, right: 0, bottom: 12, textAlign: 'center' }}
+          >
+            {status === 'none' ? 'No reference photo yet' : 'This photo could not be loaded.'}
+          </Typography>
+        </>
+      ) : null}
+      {url ? (
+        <Box
+          component="img"
+          src={url}
+          alt={alt}
+          onLoad={() => setStatus('loaded')}
+          onError={() => setStatus('error')}
+          sx={{
+            display: status === 'loaded' ? 'block' : 'none',
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+          }}
+        />
+      ) : null}
+      {status === 'loaded' ? (
+        <ButtonBase
+          onClick={() => setViewerOpen(true)}
+          aria-label="View photo full screen"
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            // Drawn inside the frame, which clips anything outside it
+            '&.Mui-focusVisible': { outline: 3, outlineColor: 'primary.main', outlineOffset: -3 },
+          }}
+        >
+          <Box
+            aria-hidden="true"
+            sx={{
+              position: 'absolute',
+              right: 8,
+              bottom: 8,
+              display: 'flex',
+              p: 0.5,
+              borderRadius: 1,
+              bgcolor: 'background.paper',
+              color: 'text.primary',
+              boxShadow: 1,
+            }}
+          >
+            <OpenInFullOutlinedIcon fontSize="small" />
+          </Box>
+        </ButtonBase>
+      ) : null}
+      {url ? (
+        <PhotoViewer open={viewerOpen} onClose={() => setViewerOpen(false)}>
           <Box
             component="img"
             src={url}
             alt={alt}
-            onLoad={() => setStatus('loaded')}
-            onError={() => setStatus('error')}
-            sx={{
-              display: status === 'loaded' ? 'block' : 'none',
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-            }}
+            sx={{ display: 'block', mx: 'auto', maxWidth: '100%', maxHeight: '88vh', objectFit: 'contain' }}
           />
-        </>
-      ) : (
-        <PhotoMessage>No reference photo yet</PhotoMessage>
-      )}
+        </PhotoViewer>
+      ) : null}
     </Box>
-  )
-}
-
-function PhotoMessage({ children }) {
-  return (
-    <Stack sx={{ height: '100%', alignItems: 'center', justifyContent: 'center', p: 2 }}>
-      <Typography variant="body2" color="textSecondary" sx={{ textAlign: 'center' }}>
-        {children}
-      </Typography>
-    </Stack>
   )
 }
 
@@ -353,94 +414,132 @@ function SpeciesRecords({ plants, error, onRetry }) {
   )
 
   return (
-    <Paper variant="outlined" sx={{ p: 3 }}>
-      <Stack spacing={2}>
-        <Typography variant="h2">Records of this species</Typography>
+    <Stack component="section" spacing={2} aria-labelledby="species-records-heading">
+      <Typography variant="h2" id="species-records-heading">
+        Records of this species
+      </Typography>
 
-        {error ? (
-          <Alert
-            severity="error"
-            action={
-              <Button color="inherit" size="small" onClick={onRetry}>
-                Retry
-              </Button>
-            }
-          >
-            {error}
-          </Alert>
-        ) : (
-          <>
-            <Stack direction="row" spacing={4} useFlexGap sx={{ flexWrap: 'wrap' }}>
-              {REVIEW_STATUSES.map((status) => (
-                <Box key={status}>
-                  <Typography variant="h2" component="p">
-                    {counts[status]}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    {reviewStatusLabels[status]}
-                  </Typography>
-                </Box>
-              ))}
-            </Stack>
+      {error ? (
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" size="small" onClick={onRetry}>
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Alert>
+      ) : null}
+      {!error && plants.length === 0 ? (
+        <Paper variant="outlined">
+          <EmptyState message="No plant records for this species yet" />
+        </Paper>
+      ) : null}
 
-            {plants.length === 0 ? (
-              <EmptyState message="No plant records for this species yet" dense />
-            ) : (
-              <TableContainer component={Paper} variant="outlined">
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell sx={{ whiteSpace: 'nowrap' }}>QR code</TableCell>
-                      <TableCell>Status</TableCell>
-                      {/* Sets the column's width, so a narrow screen scrolls the table sideways instead */}
-                      <TableCell sx={{ minWidth: (theme) => theme.spacing(30) }}>
-                        Location description
-                      </TableCell>
-                      <TableCell sx={{ whiteSpace: 'nowrap' }}>Recorded</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {plants.map((plant) => (
-                      // The row opens the record's panel; the QR code is also a button, for the keyboard
-                      <TableRow
-                        key={plant.id}
-                        hover
-                        onClick={() => setOpenPlantId(plant.id)}
-                        sx={{ cursor: 'pointer' }}
+      {!error && plants.length > 0 ? (
+        <>
+          <Grid container spacing={2}>
+            {REVIEW_STATUSES.map((status) => (
+              <Grid key={status} size={{ xs: 12, sm: 4 }}>
+                <StatCard
+                  size="small"
+                  labelComponent="h3"
+                  icon={STATUS_ICONS[status]}
+                  color={reviewStatusChipColors[status]}
+                  label={reviewStatusLabels[status]}
+                  value={counts[status].toLocaleString('en-MY')}
+                />
+              </Grid>
+            ))}
+          </Grid>
+
+          <RecordsOverTime plants={plants} />
+
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>QR code</TableCell>
+                  <TableCell>Status</TableCell>
+                  {/* Sets the column's width, so a narrow screen scrolls the table sideways instead */}
+                  <TableCell sx={{ minWidth: (theme) => theme.spacing(30) }}>
+                    Location description
+                  </TableCell>
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>Recorded</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {plants.map((plant) => (
+                  // The row opens the record's panel; the QR code is also a button, for the keyboard
+                  <TableRow
+                    key={plant.id}
+                    hover
+                    onClick={() => setOpenPlantId(plant.id)}
+                    sx={{ cursor: 'pointer' }}
+                  >
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                      <Link
+                        component="button"
+                        variant="body2"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          setOpenPlantId(plant.id)
+                        }}
                       >
-                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                          <Link
-                            component="button"
-                            variant="body2"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              setOpenPlantId(plant.id)
-                            }}
-                          >
-                            {plant.qr_code}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            label={reviewStatusLabels[plant.review_status] ?? plant.review_status}
-                            color={reviewStatusChipColors[plant.review_status] ?? 'default'}
-                          />
-                        </TableCell>
-                        <TableCell>{plant.location_description ?? '—'}</TableCell>
-                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                          {formatDateTime(plant.recorded_at)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
-          </>
-        )}
-      </Stack>
+                        {plant.qr_code}
+                      </Link>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        size="small"
+                        label={reviewStatusLabels[plant.review_status] ?? plant.review_status}
+                        color={reviewStatusChipColors[plant.review_status] ?? 'default'}
+                      />
+                    </TableCell>
+                    <TableCell>{plant.location_description ?? '—'}</TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                      {formatDateTime(plant.recorded_at)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </>
+      ) : null}
       <PlantRecordPanel plantId={openPlantId} onClose={() => setOpenPlantId(null)} />
-    </Paper>
+    </Stack>
   )
+}
+
+// The species' records per month, stacked by review status, from the records the page already
+// loaded. It runs from the month of the first record to this month (Sarawak time), and covers
+// at least the last MIN_MONTHS months so a new species still gets a readable chart.
+function RecordsOverTime({ plants }) {
+  // Fixed for this visit, like the dashboard's date
+  const [now] = useState(() => Date.now())
+  const monthKeys = recordMonthKeys(plants, now)
+  const data = monthlyRowsFromPlants(plants, monthKeys)
+
+  return (
+    <ChartCard
+      title="Records over time"
+      subtitle={`${formatMonth(`${monthKeys[0]}-01`)} to ${formatMonth(`${monthKeys.at(-1)}-01`)}`}
+      height={240}
+    >
+      <RecordsByMonthBars data={data} />
+    </ChartCard>
+  )
+}
+
+const MIN_MONTHS = 6
+
+function recordMonthKeys(plants, now) {
+  const recordedMonths = plants.map((plant) => sarawakMonthKeyOf(plant.recorded_at)).filter(Boolean)
+  // 'YYYY-MM' keys sort as text in date order
+  const last = [sarawakMonthKeyOf(now), ...recordedMonths].sort().at(-1)
+  const first = recordedMonths.length > 0 ? [...recordedMonths].sort()[0] : last
+  const keys = monthKeysBetween(first, last)
+  return keys.length >= MIN_MONTHS ? keys : monthKeysEndingAt(last, MIN_MONTHS)
 }

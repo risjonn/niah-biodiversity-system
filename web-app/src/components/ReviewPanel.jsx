@@ -22,13 +22,13 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import CloseIcon from '@mui/icons-material/Close'
 import OpenInFullOutlinedIcon from '@mui/icons-material/OpenInFullOutlined'
 import EmptyState from './EmptyState'
+import PhotoViewer from './PhotoViewer'
 import PlantPhoto from './PlantPhoto'
 import RelativeTime from './RelativeTime'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
 import { formatDateTime } from '../lib/formatDateTime'
 import { mapUrl } from '../lib/mapUrl'
 import { formatCoordinates, formatHeight } from '../lib/plantFormat'
-import { tokens } from '../theme/theme'
 
 // The review panel: one pending record at a time, with "Approve & next", "Reject & next" and
 // "Skip". The page decides which record comes next; this panel only shows it and reports actions.
@@ -159,12 +159,9 @@ export default function ReviewPanel({
         />
       ) : null}
       {plant?.photo_url ? (
-        <PhotoViewer
-          open={viewerOpen}
-          path={plant.photo_url}
-          alt={`Photo of ${plant.qr_code}`}
-          onClose={() => setViewerOpen(false)}
-        />
+        <PhotoViewer open={viewerOpen} onClose={() => setViewerOpen(false)}>
+          <PlantPhoto path={plant.photo_url} alt={`Photo of ${plant.qr_code}`} maxHeight="88vh" />
+        </PhotoViewer>
       ) : null}
     </Drawer>
   )
@@ -394,30 +391,6 @@ function RejectConfirm({ open, plant, busy, onConfirm, onClose }) {
 }
 
 // The photo as large as the screen allows, on a dark background
-function PhotoViewer({ open, path, alt, onClose }) {
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      fullScreen
-      slotProps={{ paper: { sx: { bgcolor: tokens.textPrimary } } }}
-    >
-      <IconButton
-        aria-label="Close photo"
-        onClick={onClose}
-        sx={{ position: 'absolute', top: 8, right: 8, zIndex: 1, color: tokens.surfaceWhite }}
-      >
-        <CloseIcon />
-      </IconButton>
-      <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', p: { xs: 1, sm: 4 } }}>
-        <Box sx={{ width: '100%' }}>
-          <PlantPhoto path={path} alt={alt} maxHeight="88vh" />
-        </Box>
-      </Box>
-    </Dialog>
-  )
-}
-
 function DetailField({ label, children }) {
   return (
     <Stack spacing={0.5} sx={{ minWidth: 0 }}>
