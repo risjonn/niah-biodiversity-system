@@ -13,10 +13,14 @@ import {
 } from 'react-native'
 import { useHeaderHeight } from '@react-navigation/elements'
 import Button from '../components/Button'
-import TextInput from '../components/TextInput'
+import PasswordInput from '../components/PasswordInput'
 import { useAuth } from '../context/AuthContext'
 import { useSync } from '../context/SyncContext'
 import { theme } from '../theme/theme'
+import appConfig from '../../app.json'
+
+// From app.json, so it can't drift from the version the build says it is
+const APP_VERSION = appConfig.expo.version
 
 const MIN_PASSWORD_LENGTH = 8
 const EMPTY_PASSWORD_FORM = { current: '', next: '', confirm: '' }
@@ -112,21 +116,25 @@ export default function SettingsScreen() {
               <Text style={styles.label}>Role</Text>
               <Text style={styles.value}>{formatRole(role)}</Text>
             </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.item}>
+              <Text style={styles.label}>Account protection</Text>
+              <Text style={styles.description}>
+                Your account is protected by role-based access control.
+              </Text>
+            </View>
           </View>
         </View>
+
+        <ChangePasswordSection saving={changingPassword} onSavingChange={setChangingPassword} />
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>App</Text>
 
           <View style={styles.card}>
-            <View style={styles.item}>
-              <Text style={styles.label}>App Version</Text>
-              <Text style={styles.value}>1.0.0</Text>
-            </View>
-
-            <View style={styles.divider} />
-
-            <Pressable style={styles.actionRow} onPress={showAbout}>
+            <Pressable style={styles.actionRow} onPress={showAbout} accessibilityRole="button">
               <View style={styles.actionContent}>
                 <Text style={styles.value}>About This App</Text>
                 <Text style={styles.description}>
@@ -139,7 +147,7 @@ export default function SettingsScreen() {
 
             <View style={styles.divider} />
 
-            <Pressable style={styles.actionRow} onPress={showHelp}>
+            <Pressable style={styles.actionRow} onPress={showHelp} accessibilityRole="button">
               <View style={styles.actionContent}>
                 <Text style={styles.value}>Help & Support</Text>
                 <Text style={styles.description}>
@@ -149,37 +157,20 @@ export default function SettingsScreen() {
 
               <Text style={styles.arrow}>›</Text>
             </Pressable>
+
+            <View style={styles.divider} />
+
+            <Pressable style={styles.actionRow} onPress={showDataPrivacy} accessibilityRole="button">
+              <View style={styles.actionContent}>
+                <Text style={styles.value}>Data & Privacy</Text>
+                <Text style={styles.description}>
+                  Learn how location, photos, and account data are used.
+                </Text>
+              </View>
+
+              <Text style={styles.arrow}>›</Text>
+            </Pressable>
           </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Security</Text>
-
-          <View style={styles.securityCard}>
-            <View style={styles.securityContent}>
-              <Text style={styles.value}>Account Protection</Text>
-              <Text style={styles.description}>
-                Your account is protected by role-based access control.
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        <ChangePasswordSection saving={changingPassword} onSavingChange={setChangingPassword} />
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Data & Privacy</Text>
-        
-          <View style={styles.card}> 
-            <Pressable style={styles.actionRow} onPress={showDataPrivacy}> 
-              <View style={styles.actionContent}> 
-                <Text style={styles.value}>Data & Privacy</Text> 
-                <Text style={styles.description}> Learn how location, photos, and account data are used. </Text>
-              </View> 
-              
-              <Text style={styles.arrow}>›</Text> 
-            </Pressable> 
-          </View> 
         </View>
 
         {__DEV__ ? <DeveloperSection /> : null}
@@ -187,11 +178,12 @@ export default function SettingsScreen() {
         <View style={styles.signOutContainer}>
           <Button
             title="Sign out"
-            variant="secondary"
+            variant="danger"
             onPress={handleSignOut}
             // The password check signs in again, which would undo a sign-out made while it runs
             disabled={changingPassword}
           />
+          <Text style={styles.version}>Niah Biodiversity · Version {APP_VERSION}</Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -240,14 +232,12 @@ function ChangePasswordSection({ saving, onSavingChange }) {
 
       <View style={styles.card}>
         <View style={styles.passwordForm}>
-          <TextInput
+          <PasswordInput
             label="Current password"
             value={form.current}
             onChangeText={(value) => setField('current', value)}
             error={fieldErrors.current}
             editable={!saving}
-            secureTextEntry
-            autoCapitalize="none"
             autoComplete="current-password"
             autoCorrect={false}
             textContentType="password"
@@ -255,15 +245,13 @@ function ChangePasswordSection({ saving, onSavingChange }) {
             submitBehavior="submit"
             onSubmitEditing={() => newRef.current?.focus()}
           />
-          <TextInput
+          <PasswordInput
             ref={newRef}
             label="New password"
             value={form.next}
             onChangeText={(value) => setField('next', value)}
             error={fieldErrors.next}
             editable={!saving}
-            secureTextEntry
-            autoCapitalize="none"
             autoComplete="new-password"
             autoCorrect={false}
             textContentType="newPassword"
@@ -271,15 +259,13 @@ function ChangePasswordSection({ saving, onSavingChange }) {
             submitBehavior="submit"
             onSubmitEditing={() => confirmRef.current?.focus()}
           />
-          <TextInput
+          <PasswordInput
             ref={confirmRef}
             label="Confirm new password"
             value={form.confirm}
             onChangeText={(value) => setField('confirm', value)}
             error={fieldErrors.confirm}
             editable={!saving}
-            secureTextEntry
-            autoCapitalize="none"
             autoComplete="new-password"
             autoCorrect={false}
             textContentType="newPassword"
@@ -301,7 +287,7 @@ function ChangePasswordSection({ saving, onSavingChange }) {
           <Button
             title={saving ? 'Changing password…' : 'Change password'}
             onPress={handleSubmit}
-            disabled={saving}
+            loading={saving}
           />
         </View>
       </View>
@@ -475,22 +461,6 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
   },
 
-  securityCard: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    backgroundColor: theme.colors.surfaceWhite,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius,
-    overflow: 'hidden',
-  },
-
-  securityContent: {
-    flex: 1,
-    padding: theme.spacing.lg,
-    gap: theme.spacing.xs,
-  },
-
   passwordForm: {
     padding: theme.spacing.lg,
     gap: theme.spacing.md,
@@ -511,5 +481,13 @@ const styles = StyleSheet.create({
   signOutContainer: {
     marginTop: 'auto',
     paddingTop: theme.spacing.lg,
+    gap: theme.spacing.md,
+  },
+
+  version: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: theme.typography.caption.fontSize,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
   },
 })

@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { ActivityIndicator, Alert, Image, Linking, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native'
+import Ionicons from '@expo/vector-icons/Ionicons'
 import * as ImagePicker from 'expo-image-picker'
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator'
 import Button from './Button'
@@ -29,11 +30,16 @@ const SOURCES = {
 
 // Optional photo for a form. `value` is { uri, width, height } for the resized JPEG on the device,
 // or null. Only the resized copy is ever passed to onChange, so the original is never uploaded.
+// Empty, it is a large dashed box that opens the camera (with a link to choose from the photo
+// library instead); with a photo, a preview with Retake and Remove.
 export default function PhotoField({ label, value, onChange, disabled = false, style }) {
   const [preparing, setPreparing] = useState(false)
   const [error, setError] = useState(null)
   // Set when permission was refused, so the message can offer a way to the phone settings
   const [permissionDenied, setPermissionDenied] = useState(false)
+  // The preview's measured width in px, so the image always has an explicit size (an image sized
+  // only by a percentage or aspectRatio stayed blank on an iPhone, see PhotoBanner)
+  const [previewWidth, setPreviewWidth] = useState(0)
 
   async function pick(sourceName) {
     const source = SOURCES[sourceName]
@@ -71,52 +77,79 @@ export default function PhotoField({ label, value, onChange, disabled = false, s
     }
   }
 
-  function handleAdd() {
-    Alert.alert('Add photo', undefined, [
-      { text: 'Take photo', onPress: () => pick('camera') },
-      { text: 'Choose from library', onPress: () => pick('library') },
-      { text: 'Cancel', style: 'cancel' },
-    ])
-  }
-
   function handleRemove() {
     setError(null)
     onChange(null)
   }
+
+  const busy = disabled || preparing
 
   return (
     <View style={style}>
       {label ? <Text style={styles.label}>{label}</Text> : null}
       {value ? (
         <View style={styles.preview}>
-          <Image
-            source={{ uri: value.uri }}
-            style={styles.thumbnail}
-            resizeMode="cover"
-            accessibilityLabel="Chosen photo"
-          />
-          <Button
-            title="Remove photo"
-            variant="secondary"
-            onPress={handleRemove}
-            disabled={disabled}
-          />
+          <View
+            style={styles.previewFrame}
+            onLayout={(event) => setPreviewWidth(Math.round(event.nativeEvent.layout.width))}
+          >
+            {previewWidth > 0 ? (
+              <Image
+                source={{ uri: value.uri }}
+                style={{ width: previewWidth, height: Math.round((previewWidth * 3) / 4) }}
+                resizeMode="cover"
+                accessibilityLabel="Chosen photo"
+              />
+            ) : null}
+          </View>
+          <View style={styles.previewActions}>
+            <View style={styles.previewAction}>
+              <Button
+                title={preparing ? 'Preparing…' : 'Retake'}
+                variant="secondary"
+                onPress={() => pick('camera')}
+                disabled={disabled}
+                loading={preparing}
+              />
+            </View>
+            <View style={styles.previewAction}>
+              <Button title="Remove" variant="secondary" onPress={handleRemove} disabled={busy} />
+            </View>
+          </View>
         </View>
       ) : (
-        <Button
-          title={preparing ? 'Preparing photo…' : 'Add photo'}
-          variant="secondary"
-          onPress={handleAdd}
-          disabled={disabled || preparing}
-        />
+        <>
+          <Pressable
+            onPress={() => pick('camera')}
+            disabled={busy}
+            accessibilityRole="button"
+            accessibilityLabel="Take a photo"
+            accessibilityState={{ disabled: busy, busy: preparing }}
+            style={({ pressed }) => [styles.dropBox, pressed && styles.pressed, disabled && styles.dimmed]}
+          >
+            {preparing ? (
+              <>
+                <ActivityIndicator color={theme.colors.primary} accessibilityLabel="Preparing photo" />
+                <Text style={styles.dropText}>Preparing photo…</Text>
+              </>
+            ) : (
+              <>
+                <Ionicons name="camera-outline" size={36} color={theme.colors.primary} />
+                <Text style={styles.dropText}>Tap to take a photo</Text>
+              </>
+            )}
+          </Pressable>
+          <Pressable
+            onPress={() => pick('library')}
+            disabled={busy}
+            accessibilityRole="button"
+            hitSlop={theme.spacing.md}
+            style={({ pressed }) => [styles.libraryLink, (pressed || busy) && styles.dimmed]}
+          >
+            <Text style={styles.libraryLinkText}>Or choose from your photos</Text>
+          </Pressable>
+        </>
       )}
-      {preparing ? (
-        <ActivityIndicator
-          style={styles.spinner}
-          color={theme.colors.primary}
-          accessibilityLabel="Preparing photo"
-        />
-      ) : null}
       {error ? (
         <View style={styles.errorBox}>
           <Text style={styles.error} accessibilityLiveRegion="polite">
@@ -160,17 +193,53 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.xs,
   },
   preview: {
-    gap: theme.spacing.sm,
+    gap: theme.spacing.md,
   },
-  // A square crop, kept small so the rest of the form stays in view
-  thumbnail: {
-    width: '40%',
-    aspectRatio: 1,
+  previewFrame: {
+    alignSelf: 'stretch',
+    overflow: 'hidden',
     borderRadius: theme.radius,
     backgroundColor: theme.colors.border,
   },
-  spinner: {
-    marginTop: theme.spacing.sm,
+  previewActions: {
+    flexDirection: 'row',
+    gap: theme.spacing.md,
+  },
+  previewAction: {
+    flex: 1,
+  },
+  dropBox: {
+    minHeight: 180,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.sm,
+    padding: theme.spacing.lg,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: theme.colors.primary,
+    borderRadius: theme.radius,
+    backgroundColor: theme.colors.surfaceWhite,
+  },
+  dropText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: theme.typography.body.fontSize,
+    color: theme.colors.primary,
+  },
+  pressed: {
+    opacity: 0.8,
+  },
+  dimmed: {
+    opacity: 0.5,
+  },
+  libraryLink: {
+    alignSelf: 'center',
+    marginTop: theme.spacing.md,
+  },
+  libraryLinkText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: theme.typography.bodySmall.fontSize,
+    color: theme.colors.primary,
+    textDecorationLine: 'underline',
   },
   errorBox: {
     marginTop: theme.spacing.sm,

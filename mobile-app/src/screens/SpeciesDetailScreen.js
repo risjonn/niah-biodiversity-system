@@ -10,9 +10,10 @@ import { theme } from '../theme/theme'
 
 // One species, read-only. Opened with { speciesId } and, from the Species tab, the species itself
 // as { species }, which shows straight away; otherwise it is looked up in the species list (the
-// copy saved on the phone when offline).
+// copy saved on the phone when offline). Guests (signed out) open it with { guest: true }, read-only
+// and without the "Your records" line.
 export default function SpeciesDetailScreen({ route, navigation }) {
-  const { speciesId, species: initialSpecies } = route.params ?? {}
+  const { speciesId, species: initialSpecies, guest = false } = route.params ?? {}
   const { fetchSpecies } = useSpecies()
   const { getLoadedMyPlants } = usePlants()
   const [species, setSpecies] = useState(initialSpecies ?? null)
@@ -56,7 +57,7 @@ export default function SpeciesDetailScreen({ route, navigation }) {
 
   // Counted from the botanist's records already loaded this session (Home or Records); left out
   // when they haven't loaded, rather than loading them just for this
-  const myPlants = getLoadedMyPlants()
+  const myPlants = guest ? null : getLoadedMyPlants()
   const myRecordCount = myPlants
     ? myPlants.filter((plant) => plant.species_id === species.id).length
     : null

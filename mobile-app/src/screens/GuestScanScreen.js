@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
-  Image,
   Keyboard,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,18 +11,22 @@ import {
 import Ionicons from '@expo/vector-icons/Ionicons'
 import Button from '../components/Button'
 import ConservationStatusChip from '../components/ConservationStatusChip'
+import HeaderBand from '../components/HeaderBand'
+import PhotoBanner from '../components/PhotoBanner'
 import QrScanner from '../components/QRScanner'
 import ScientificName from '../components/ScientificName'
 import TextInput from '../components/TextInput'
 import { usePublicPlants } from '../hooks/usePublicPlants'
 import { useSpecies } from '../hooks/useSpecies'
 import { QR_CODE_PATTERN, normaliseQrCode } from '../lib/qrCode'
+import { formatDate } from '../lib/sarawakTime'
 import { theme } from '../theme/theme'
 
-// Guest mode: scan a plant's QR tag, or type its code, to see the approved record and its species.
-// Works offline from the plant and species lists saved on the phone. Guests are not signed in, so
-// only public data is used: the plants_public view and the species table.
-export default function GuestScanScreen() {
+// Guest mode: scan a plant's QR tag, or type its code, to see the approved record and its species,
+// or browse the species list. Works offline from the plant and species lists saved on the phone.
+// Guests are not signed in, so only public data is used: the plants_public view (approved plants
+// only), the species table and the species' public reference photos.
+export default function GuestScanScreen({ navigation }) {
   const plants = usePublicPlants()
   const { fetchSpecies } = useSpecies()
   const [speciesResult, setSpeciesResult] = useState(null)
@@ -34,10 +38,16 @@ export default function GuestScanScreen() {
   const scanLockedRef = useRef(false)
   const [code, setCode] = useState('')
   const [codeError, setCodeError] = useState(null)
-  // { plant } or { message }, or null while nothing has been looked up
+  // { plant }, { notPublic: true } or { message }, or null while nothing has been looked up
   const [lookup, setLookup] = useState(null)
   const scrollRef = useRef(null)
+  // Where the scan section and the result are, for scrolling to them: each is measured inside the
+  // padded container, which itself sits below the band
+  const containerYRef = useRef(0)
+  const scanYRef = useRef(0)
   const resultYRef = useRef(0)
+  const scrollToSection = (sectionYRef) =>
+    scrollRef.current?.scrollTo({ y: containerYRef.current + sectionYRef.current, animated: true })
 
   const loadSpecies = useCallback(() => {
     setSpeciesResult(null)
@@ -61,7 +71,7 @@ export default function GuestScanScreen() {
 
   // Brings the result into view, below the camera and code box
   useEffect(() => {
-    if (lookup) scrollRef.current?.scrollTo({ y: resultYRef.current, animated: true })
+    if (lookup) scrollToSection(resultYRef)
   }, [lookup])
 
   function lookUp(rawCode) {
@@ -70,8 +80,9 @@ export default function GuestScanScreen() {
 
     const { data: plant, error } = plants.lookupByQrCode(normalised)
     if (error) return { message: error }
-    // Same message whether the code doesn't exist or isn't approved yet
-    if (!plant) return { message: 'No approved record for this tag yet.' }
+    // Guests can only read approved plants, so a code that is pending, rejected or not in use
+    // looks the same: none of them is public
+    if (!plant) return { notPublic: true }
     return { plant }
   }
 
@@ -109,7 +120,11 @@ export default function GuestScanScreen() {
     setCodeError(null)
     scanLockedRef.current = false
     setScanning(true)
-    scrollRef.current?.scrollTo({ y: 0, animated: true })
+    scrollToSection(scanYRef)
+  }
+
+  function openSpecies(species) {
+    navigation.navigate('SpeciesDetail', { speciesId: species.id, species, guest: true })
   }
 
   const loading = plants.loading || !speciesResult
@@ -117,93 +132,149 @@ export default function GuestScanScreen() {
   return (
     <ScrollView
       ref={scrollRef}
-      contentContainerStyle={styles.container}
+      style={styles.screen}
       keyboardShouldPersistTaps="handled"
       automaticallyAdjustKeyboardInsets
     >
-      {loading ? (
-        <View style={styles.statusRow}>
-          <ActivityIndicator color={theme.colors.primary} accessibilityLabel="Loading" />
-          <Text style={styles.note}>Loading plant data…</Text>
-        </View>
-      ) : null}
-      {plants.error ? (
-        <View style={styles.status}>
-          <Text style={styles.errorText} accessibilityLiveRegion="polite">
-            {plants.error}
-          </Text>
-          <Button title="Try again" variant="secondary" onPress={retry} />
-        </View>
-      ) : null}
-      {plants.savedAt ? (
-        <Text style={styles.note}>Using plant data saved on {formatDate(plants.savedAt)}</Text>
-      ) : null}
-      {speciesResult?.savedAt ? (
-        <Text style={styles.note}>
-          Using species data saved on {formatDate(speciesResult.savedAt)}
-        </Text>
-      ) : null}
-
-      <Text style={styles.heading}>Scan a plant tag</Text>
-      <Text style={styles.intro}>
-        Point the camera at the QR code on a plant tag to learn about the plant.
-      </Text>
-
-      <QrScanner
-        scanning={scanning}
-        onScan={handleScanned}
-        onUsableChange={setCameraUsable}
-        typeHint=" You can still type the code below."
+      {/* Right under the primary header, which only shows Back, so the two read as one */}
+      <HeaderBand
+        title="Explore Niah's plants"
+        subtitle="Scan a plant tag, or browse the species of Niah National Park."
       />
 
-      <View style={styles.codeBox}>
-        <TextInput
-          label="Enter code"
-          placeholder="NIAH-XXXXXX"
-          value={code}
-          onChangeText={setCode}
-          error={codeError}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          autoComplete="off"
-          returnKeyType="search"
-          onSubmitEditing={handleLookUpCode}
-        />
-        <Button title="Look up" variant="secondary" onPress={handleLookUpCode} />
-      </View>
-
       <View
+        style={styles.container}
         onLayout={(event) => {
-          resultYRef.current = event.nativeEvent.layout.y
+          containerYRef.current = event.nativeEvent.layout.y
         }}
       >
-        {lookup ? (
-          <View style={styles.result}>
-            {lookup.plant ? (
-              <PlantResult
-                plant={lookup.plant}
-                species={speciesById.get(lookup.plant.species_id)}
-                speciesLoading={!speciesResult}
-              />
-            ) : (
-              <View style={styles.card}>
-                <Text style={styles.body} accessibilityLiveRegion="polite">
-                  {lookup.message}
-                </Text>
-              </View>
-            )}
-            <Button
-              title={cameraUsable ? 'Scan another' : 'Look up another'}
-              onPress={scanAnother}
-            />
+        <View style={styles.actions}>
+          <ActionTile
+            icon="qr-code-outline"
+            label="Scan a tag"
+            onPress={() => scrollToSection(scanYRef)}
+          />
+          <ActionTile
+            icon="leaf-outline"
+            label="Browse species"
+            onPress={() => navigation.navigate('PlantSpecies', { guest: true })}
+          />
+        </View>
+
+        {loading ? (
+          <View style={styles.statusRow}>
+            <ActivityIndicator color={theme.colors.primary} accessibilityLabel="Loading" />
+            <Text style={styles.note}>Loading plant data…</Text>
           </View>
         ) : null}
+        {plants.error ? (
+          <View style={styles.status}>
+            <Text style={styles.errorText} accessibilityLiveRegion="polite">
+              {plants.error}
+            </Text>
+            <Button title="Try again" variant="secondary" onPress={retry} />
+          </View>
+        ) : null}
+        {plants.savedAt ? (
+          <Text style={styles.note}>Using plant data saved on {formatDate(plants.savedAt)}</Text>
+        ) : null}
+        {speciesResult?.savedAt ? (
+          <Text style={styles.note}>
+            Using species data saved on {formatDate(speciesResult.savedAt)}
+          </Text>
+        ) : null}
+
+        <View
+          style={styles.scanSection}
+          onLayout={(event) => {
+            scanYRef.current = event.nativeEvent.layout.y
+          }}
+        >
+          <Text style={styles.heading} accessibilityRole="header">
+            Scan a plant tag
+          </Text>
+          <Text style={styles.intro}>
+            Point the camera at the QR code on a plant tag to learn about the plant.
+          </Text>
+
+          <QrScanner
+            scanning={scanning}
+            onScan={handleScanned}
+            onUsableChange={setCameraUsable}
+            typeHint=" You can still type the code below."
+          />
+
+          <View style={styles.codeBox}>
+            <TextInput
+              label="Enter code"
+              placeholder="NIAH-XXXXXX"
+              value={code}
+              onChangeText={setCode}
+              error={codeError}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              autoComplete="off"
+              returnKeyType="search"
+              onSubmitEditing={handleLookUpCode}
+            />
+            <Button title="Look up" variant="secondary" onPress={handleLookUpCode} />
+          </View>
+        </View>
+
+        <View
+          onLayout={(event) => {
+            resultYRef.current = event.nativeEvent.layout.y
+          }}
+        >
+          {lookup ? (
+            <View style={styles.result}>
+              {lookup.plant ? (
+                <PlantResult
+                  plant={lookup.plant}
+                  species={speciesById.get(lookup.plant.species_id)}
+                  speciesLoading={!speciesResult}
+                  onLearnMore={openSpecies}
+                />
+              ) : lookup.notPublic ? (
+                <NotPublicResult />
+              ) : (
+                <View style={styles.card}>
+                  <Text style={styles.body} accessibilityLiveRegion="polite">
+                    {lookup.message}
+                  </Text>
+                </View>
+              )}
+              <Button
+                title={cameraUsable ? 'Scan another' : 'Look up another'}
+                variant="secondary"
+                onPress={scanAnother}
+              />
+            </View>
+          ) : null}
+        </View>
       </View>
     </ScrollView>
   )
 }
 
-function PlantResult({ plant, species, speciesLoading }) {
+function ActionTile({ icon, label, onPress }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => [styles.tile, pressed && styles.pressed]}
+    >
+      <Ionicons name={icon} size={24} color={theme.colors.primary} />
+      <Text style={styles.tileLabel}>{label}</Text>
+    </Pressable>
+  )
+}
+
+// An approved plant: its species (reference photo, names, status, a short description and
+// "Learn more"), then the record's own details. The plant's own photo isn't shown: plant photos
+// are in a private bucket guests can't read.
+function PlantResult({ plant, species, speciesLoading, onLearnMore }) {
   const latitude = Number(plant.latitude)
   const longitude = Number(plant.longitude)
   // Monitored plants' coordinates are already rounded to 2 decimal places by plants_public
@@ -213,21 +284,25 @@ function PlantResult({ plant, species, speciesLoading }) {
     <View style={styles.card} accessibilityLiveRegion="polite">
       {species ? (
         <>
-          <ScientificName style={styles.scientificName}>{species.scientific_name}</ScientificName>
-          {species.common_name ? <Text style={styles.commonName}>{species.common_name}</Text> : null}
-          {species.family ? <Text style={styles.family}>Family: {species.family}</Text> : null}
-          {species.conservation_status ? (
-            <ConservationStatusChip status={species.conservation_status} />
+          <PhotoBanner
+            uri={species.reference_photo_url}
+            alt={`Reference photo of ${species.scientific_name}`}
+            tint={theme.chart.conservationStatus[species.conservation_status]}
+            emptyText="No photo of this species yet"
+          />
+          <View style={styles.titleBlock}>
+            <ScientificName style={styles.scientificName}>{species.scientific_name}</ScientificName>
+            {species.common_name ? <Text style={styles.commonName}>{species.common_name}</Text> : null}
+            {species.conservation_status ? (
+              <ConservationStatusChip status={species.conservation_status} style={styles.chip} />
+            ) : null}
+          </View>
+          {species.description?.trim() ? (
+            <Text style={styles.body} numberOfLines={3}>
+              {species.description.trim()}
+            </Text>
           ) : null}
-          {species.reference_photo_url ? (
-            <SpeciesPhoto
-              key={species.reference_photo_url}
-              uri={species.reference_photo_url}
-              name={species.scientific_name}
-            />
-          ) : null}
-          <Detail label="About this species" value={species.description} />
-          <Detail label="Cultural significance" value={species.cultural_significance} />
+          <Button title="Learn more" onPress={() => onLearnMore(species)} />
         </>
       ) : (
         <Text style={styles.note}>
@@ -252,6 +327,22 @@ function PlantResult({ plant, species, speciesLoading }) {
   )
 }
 
+// A tag that is valid but has no approved plant: pending review, rejected, or not used yet
+function NotPublicResult() {
+  return (
+    <View style={[styles.card, styles.notPublic]} accessibilityLiveRegion="polite">
+      <View style={styles.notPublicIcon}>
+        <Ionicons name="time-outline" size={28} color={theme.colors.primary} accessibilityElementsHidden />
+      </View>
+      <Text style={styles.notPublicTitle}>This plant isn&apos;t public yet</Text>
+      <Text style={styles.notPublicText}>
+        Its record may still be waiting for a conservation officer to check it. Try again another
+        time.
+      </Text>
+    </View>
+  )
+}
+
 // A labelled line of the result card. Skipped when there is no value.
 function Detail({ label, value }) {
   const text = typeof value === 'string' ? value.trim() : value
@@ -264,42 +355,42 @@ function Detail({ label, value }) {
   )
 }
 
-// The species' public reference photo, or a placeholder when it can't load (e.g. offline). Only
-// rendered when the species has a photo. Plant photos are never shown: they are in a bucket guests
-// can't read.
-function SpeciesPhoto({ uri, name }) {
-  const [failed, setFailed] = useState(false)
-
-  if (failed) {
-    return (
-      <View style={[styles.photo, styles.photoPlaceholder]} accessibilityLabel="No photo available">
-        <Ionicons name="leaf-outline" size={48} color={theme.colors.textSecondary} />
-      </View>
-    )
-  }
-  return (
-    <Image
-      source={{ uri }}
-      style={styles.photo}
-      resizeMode="cover"
-      onError={() => setFailed(true)}
-      accessibilityLabel={`Reference photo of ${name}`}
-    />
-  )
-}
-
-// e.g. "3 Oct 2026"
-function formatDate(iso) {
-  return new Date(iso).toLocaleDateString('en-MY', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
-}
-
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: theme.colors.surface,
+  },
   container: {
     padding: theme.spacing.lg,
+    paddingBottom: theme.spacing.xxxl,
+    gap: theme.spacing.lg,
+  },
+  pressed: {
+    opacity: 0.8,
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: theme.spacing.md,
+  },
+  tile: {
+    flex: 1,
+    minHeight: 88,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing.sm,
+    padding: theme.spacing.md,
+    borderRadius: theme.radius,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceWhite,
+  },
+  tileLabel: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: theme.typography.bodySmall.fontSize,
+    color: theme.colors.textPrimary,
+    textAlign: 'center',
+  },
+  scanSection: {
     gap: theme.spacing.md,
   },
   statusRow: {
@@ -333,6 +424,7 @@ const styles = StyleSheet.create({
   body: {
     fontFamily: 'Inter_400Regular',
     fontSize: theme.typography.body.fontSize,
+    lineHeight: 22,
     color: theme.colors.textPrimary,
   },
   codeBox: {
@@ -349,31 +441,44 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius,
     backgroundColor: theme.colors.surfaceWhite,
   },
+  titleBlock: {
+    gap: theme.spacing.xs,
+  },
   scientificName: {
     fontSize: theme.typography.heading3.fontSize,
     color: theme.colors.textPrimary,
   },
   commonName: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: theme.typography.body.fontSize,
-    color: theme.colors.textPrimary,
-    marginTop: -theme.spacing.sm,
-  },
-  family: {
     fontFamily: 'Inter_400Regular',
-    fontSize: theme.typography.bodySmall.fontSize,
+    fontSize: theme.typography.body.fontSize,
     color: theme.colors.textSecondary,
-    marginTop: -theme.spacing.sm,
   },
-  photo: {
-    width: '100%',
-    aspectRatio: 4 / 3,
-    borderRadius: theme.radius,
-    backgroundColor: theme.colors.border,
+  chip: {
+    marginTop: theme.spacing.xs,
   },
-  photoPlaceholder: {
+  notPublic: {
+    alignItems: 'center',
+  },
+  notPublicIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: theme.colors.surface,
+  },
+  notPublicTitle: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: theme.typography.heading3.fontSize,
+    color: theme.colors.textPrimary,
+    textAlign: 'center',
+  },
+  notPublicText: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: theme.typography.body.fontSize,
+    lineHeight: 22,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
   },
   divider: {
     height: StyleSheet.hairlineWidth,

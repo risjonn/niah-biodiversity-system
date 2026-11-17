@@ -133,11 +133,29 @@ export default function RootNavigator() {
             ))}
           </Stack.Group>
         ) : (
-          // Signed out: only the login screen and guest mode are reachable
+          // Signed out: only the login screen and guest mode (scanning tags and browsing species,
+          // read-only) are reachable
           <Stack.Group screenOptions={{ animationTypeForReplace: 'pop' }}>
             {/* Login draws its own title band in place of the header */}
             <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="GuestScan" component={GuestScanScreen} options={{ title: 'Explore' }} />
+            {/* The band under the header carries the title, so the header shows only Back */}
+            <Stack.Screen
+              name="GuestScan"
+              component={GuestScanScreen}
+              options={{ title: '', headerShadowVisible: false }}
+            />
+            <Stack.Screen
+              name="PlantSpecies"
+              component={PlantSpeciesScreen}
+              options={{ title: 'Plant Species' }}
+              initialParams={{ guest: true }}
+            />
+            <Stack.Screen
+              name="SpeciesDetail"
+              component={SpeciesDetailScreen}
+              options={{ title: 'Species' }}
+              initialParams={{ guest: true }}
+            />
           </Stack.Group>
         )}
       </Stack.Navigator>
