@@ -1,218 +1,228 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useFocusEffect } from '@react-navigation/native'
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native'
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native'
+import Ionicons from '@expo/vector-icons/Ionicons'
+import ConservationStatusChip from '../components/ConservationStatusChip'
+import EmptyState from '../components/EmptyState'
+import FilterChip from '../components/FilterChip'
+import PlantThumbnail from '../components/PlantThumbnail'
 import ScientificName from '../components/ScientificName'
+import SkeletonRows from '../components/Skeleton'
+import TextInput from '../components/TextInput'
 import { useSpecies } from '../hooks/useSpecies'
+import { conservationStatusLabels, conservationStatuses } from '../lib/conservationStatus'
+import { formatDateTime } from '../lib/sarawakTime'
 import { theme } from '../theme/theme'
 
-export default function PlantSpeciesScreen() {
+// The species catalogue: search by name, filter by conservation status (each status with how
+// many of the search's matches have it), pull to refresh. A species opens its detail screen.
+export default function PlantSpeciesScreen({ navigation }) {
   const { fetchSpecies } = useSpecies()
-
-  const [species, setSpecies] = useState([])
-  const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
+  // { data, savedAt } once loaded; kept while reloading
+  const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [search, setSearch] = useState('')
+  // '' for all, or a conservation_status
+  const [status, setStatus] = useState('')
 
-  const loadSpecies = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-
-    try {
-      const result = await fetchSpecies()
-
-      if (result.error) {
-        setError(result.error)
-      } else {
-        setSpecies(result.data ?? [])
-      }
-    } catch {
-      setError('Unable to load plant species. Please try again.')
-    } finally {
-      setLoading(false)
+  async function loadSpecies() {
+    const nextResult = await fetchSpecies()
+    if (nextResult.error) {
+      setError(nextResult.error)
+      return
     }
-  }, [fetchSpecies])
+    setError(null)
+    setResult({ data: nextResult.data, savedAt: nextResult.savedAt })
+  }
 
+  // The focus effect always calls the latest loadSpecies
+  const loadRef = useRef(loadSpecies)
+  useEffect(() => {
+    loadRef.current = loadSpecies
+  })
+
+  // Every time the tab comes into view, as before, so new species show up
   useFocusEffect(
     useCallback(() => {
-      loadSpecies()
-    }, [loadSpecies])
+      loadRef.current()
+    }, []),
   )
 
-  const filteredSpecies = useMemo(() => {
-    const keyword = search.trim().toLowerCase()
+  async function handleRefresh() {
+    setRefreshing(true)
+    await loadSpecies()
+    setRefreshing(false)
+  }
 
-    if (!keyword) return species
-
-    return species.filter((item) =>
-      [item.scientific_name, item.common_name].some((name) =>
-        name?.toLowerCase().includes(keyword)
-      )
-    )
-  }, [species, search])
+  const keyword = search.trim().toLowerCase()
+  const matches = (result?.data ?? []).filter(
+    (item) =>
+      !keyword ||
+      [item.scientific_name, item.common_name].some((name) => name?.toLowerCase().includes(keyword)),
+  )
+  const counts = Object.fromEntries(
+    conservationStatuses.map((value) => [
+      value,
+      matches.filter((item) => item.conservation_status === value).length,
+    ]),
+  )
+  const shown = status ? matches.filter((item) => item.conservation_status === status) : matches
 
   return (
     <ScrollView
+      style={styles.screen}
       contentContainerStyle={styles.container}
       keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
+      keyboardDismissMode="on-drag"
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          tintColor={theme.colors.primary}
+          colors={[theme.colors.primary]}
+        />
+      }
     >
-      <View style={styles.header}>
-        <Text style={styles.title}>Plant Species</Text>
-        <Text style={styles.subtitle}>
-          Search the species database by scientific or common name.
-        </Text>
-      </View>
-
       <TextInput
-        style={styles.searchInput}
-        placeholder="Search plant species..."
-        placeholderTextColor={theme.colors.textSecondary}
         value={search}
         onChangeText={setSearch}
+        placeholder="Search by scientific or common name"
+        accessibilityLabel="Search plant species"
         autoCapitalize="none"
         autoCorrect={false}
-        accessibilityLabel="Search plant species"
         returnKeyType="search"
+        clearButtonMode="while-editing"
       />
 
-      <View style={styles.resultHeader}>
-        <Text style={styles.resultCount}>
-          {loading ? 'Loading species...' : `${filteredSpecies.length} species found`}
-        </Text>
-
-        <Pressable
-          style={styles.refreshButton}
-          onPress={loadSpecies}
-          disabled={loading}
-        >
-          <Text style={styles.refreshText}>
-            {loading ? 'Loading...' : 'Refresh'}
-          </Text>
-        </Pressable>
+      <View style={styles.chips} accessibilityLabel="Filter by conservation status">
+        <FilterChip
+          label="All"
+          count={result ? matches.length : null}
+          selected={status === ''}
+          onPress={() => setStatus('')}
+        />
+        {conservationStatuses.map((value) => (
+          <FilterChip
+            key={value}
+            label={conservationStatusLabels[value]}
+            count={result ? counts[value] : null}
+            color={theme.chart.conservationStatus[value]}
+            selected={status === value}
+            onPress={() => setStatus(value)}
+          />
+        ))}
       </View>
 
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator
-            size="large"
-            color={theme.colors.primary}
-            accessibilityLabel="Loading plant species"
-          />
-        </View>
-      ) : error ? (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>Unable to load species</Text>
-          <Text style={styles.message}>{error}</Text>
+      {result?.savedAt ? (
+        <Text style={styles.note}>
+          Offline: showing the list saved on {formatDateTime(result.savedAt)}.
+        </Text>
+      ) : null}
 
-          <Pressable style={styles.retryButton} onPress={loadSpecies}>
-            <Text style={styles.retryText}>Try Again</Text>
-          </Pressable>
-        </View>
-      ) : filteredSpecies.length === 0 ? (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>No species found</Text>
-          <Text style={styles.message}>
-            Try another scientific or common name.
-          </Text>
-        </View>
-      ) : (
+      {!result && !error ? <SkeletonRows count={5} label="Loading plant species" /> : null}
+      {error && !result ? (
+        <EmptyState
+          icon="cloud-offline-outline"
+          message={error}
+          action={{ title: 'Try again', onPress: handleRefresh }}
+        />
+      ) : null}
+      {error && result ? <Text style={styles.note}>Couldn&apos;t refresh: {error}</Text> : null}
+
+      {result && shown.length === 0 ? (
+        <EmptyState
+          icon="search-outline"
+          message={
+            keyword
+              ? 'No species match your search.'
+              : status
+                ? `No ${conservationStatusLabels[status].toLowerCase()} species`
+                : 'No species in the database yet.'
+          }
+        />
+      ) : null}
+
+      {shown.length > 0 ? (
         <View style={styles.list}>
-          {filteredSpecies.map((item) => (
-            <View key={item.id} style={styles.card}>
-              <ScientificName style={styles.scientificName}>
-                {item.scientific_name}
-              </ScientificName>
-
-              <Text style={styles.commonName}>
-                {item.common_name || 'Common name not available'}
-              </Text>
-            </View>
+          {shown.map((item) => (
+            <SpeciesCard
+              key={item.id}
+              species={item}
+              onPress={() => navigation.navigate('SpeciesDetail', { speciesId: item.id, species: item })}
+            />
           ))}
         </View>
-      )}
+      ) : null}
     </ScrollView>
   )
 }
 
+function SpeciesCard({ species, onPress }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityHint="Opens the species"
+      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+    >
+      {/* The same public reference photo the web app shows */}
+      <PlantThumbnail
+        uri={species.reference_photo_url}
+        tint={theme.chart.conservationStatus[species.conservation_status]}
+      />
+      <View style={styles.cardText}>
+        <ScientificName style={styles.scientificName}>{species.scientific_name}</ScientificName>
+        {species.common_name ? <Text style={styles.commonName}>{species.common_name}</Text> : null}
+        <ConservationStatusChip status={species.conservation_status} style={styles.chip} />
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={theme.colors.textSecondary} />
+    </Pressable>
+  )
+}
+
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: theme.colors.surface,
+  },
   container: {
     padding: theme.spacing.lg,
-    paddingBottom: theme.spacing.xxl,
-    gap: theme.spacing.md,
+    paddingBottom: theme.spacing.xxxl,
+    gap: theme.spacing.lg,
   },
-  header: {
-    gap: theme.spacing.xs,
+  pressed: {
+    opacity: 0.8,
   },
-  title: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: theme.typography.heading1.fontSize,
-    color: theme.colors.textPrimary,
-  },
-  subtitle: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: theme.typography.bodySmall.fontSize,
-    lineHeight: 20,
-    color: theme.colors.textSecondary,
-  },
-  searchInput: {
-    minHeight: 48,
-    paddingHorizontal: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius,
-    backgroundColor: theme.colors.surfaceWhite,
-    color: theme.colors.textPrimary,
-    fontFamily: 'Inter_400Regular',
-    fontSize: theme.typography.bodySmall.fontSize,
-  },
-  resultHeader: {
+  chips: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
     gap: theme.spacing.sm,
   },
-  resultCount: {
-    flex: 1,
-    fontFamily: 'Inter_500Medium',
-    fontSize: theme.typography.caption.fontSize,
-    color: theme.colors.textSecondary,
-  },
-  refreshButton: {
-    minHeight: theme.buttonHeight,
-    paddingHorizontal: theme.spacing.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius,
-    backgroundColor: theme.colors.surfaceWhite,
-  },
-  refreshText: {
-    fontFamily: 'Inter_500Medium',
+  note: {
+    fontFamily: 'Inter_400Regular',
     fontSize: theme.typography.bodySmall.fontSize,
-    color: theme.colors.primary,
+    color: theme.colors.textSecondary,
   },
   list: {
     gap: theme.spacing.md,
   },
   card: {
-    padding: theme.spacing.lg,
-    gap: theme.spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.md,
+    padding: theme.spacing.md,
+    backgroundColor: theme.colors.surfaceWhite,
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.radius,
-    backgroundColor: theme.colors.surfaceWhite,
+  },
+  cardText: {
+    flex: 1,
+    gap: theme.spacing.xs,
   },
   scientificName: {
-    fontSize: theme.typography.heading3.fontSize,
+    fontSize: theme.typography.body.fontSize,
     color: theme.colors.textPrimary,
   },
   commonName: {
@@ -220,42 +230,7 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.bodySmall.fontSize,
     color: theme.colors.textSecondary,
   },
-  center: {
-    padding: theme.spacing.xl,
-    alignItems: 'center',
-  },
-  emptyCard: {
-    padding: theme.spacing.xl,
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius,
-    backgroundColor: theme.colors.surfaceWhite,
-  },
-  emptyTitle: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: theme.typography.heading3.fontSize,
-    color: theme.colors.textPrimary,
-  },
-  message: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: theme.typography.bodySmall.fontSize,
-    lineHeight: 20,
-    color: theme.colors.textSecondary,
-    textAlign: 'center',
-  },
-  retryButton: {
-    minHeight: theme.buttonHeight,
-    paddingHorizontal: theme.spacing.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: theme.radius,
-    backgroundColor: theme.colors.primary,
-  },
-  retryText: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: theme.typography.bodySmall.fontSize,
-    color: theme.colors.surfaceWhite,
+  chip: {
+    marginTop: theme.spacing.xs,
   },
 })

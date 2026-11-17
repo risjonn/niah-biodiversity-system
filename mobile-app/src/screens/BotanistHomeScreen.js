@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useFocusEffect } from '@react-navigation/native'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import EmptyState from '../components/EmptyState'
 import HeaderBand from '../components/HeaderBand'
+import PlantThumbnail from '../components/PlantThumbnail'
 import ReviewStatusChip from '../components/ReviewStatusChip'
 import ScanTagModal from '../components/ScanTagModal'
 import ScientificName from '../components/ScientificName'
 import SkeletonRows, { SkeletonBlock, SkeletonGroup } from '../components/Skeleton'
 import { useAuth } from '../context/AuthContext'
 import { useSync } from '../context/SyncContext'
-import { usePlantPhoto } from '../hooks/usePlantPhoto'
 import { usePlants } from '../hooks/usePlants'
 import { useSpecies } from '../hooks/useSpecies'
 import { reviewStatuses, reviewStatusLabels, reviewStatusShortLabels } from '../lib/reviewStatus'
@@ -195,7 +195,7 @@ export default function BotanistHomeScreen({ navigation }) {
                   species={data.speciesById.get(plant.species_id)}
                   now={now}
                   first={index === 0}
-                  onPress={() => navigation.navigate('MyRecords')}
+                  onPress={() => navigation.navigate('RecordDetail', { plantId: plant.id, plant })}
                 />
               ))}
             </View>
@@ -203,7 +203,15 @@ export default function BotanistHomeScreen({ navigation }) {
         </View>
       </View>
 
-      {scanOpen ? <ScanTagModal onClose={() => setScanOpen(false)} /> : null}
+      {scanOpen ? (
+        <ScanTagModal
+          onClose={() => setScanOpen(false)}
+          onViewRecord={(plant) => {
+            setScanOpen(false)
+            navigation.navigate('RecordDetail', { plantId: plant.id, plant })
+          }}
+        />
+      ) : null}
     </ScrollView>
   )
 }
@@ -249,10 +257,10 @@ function RecentRecord({ plant, species, now, first, onPress }) {
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`${name}, ${reviewStatusLabels[plant.review_status] ?? plant.review_status}, recorded ${ago}`}
-      accessibilityHint="Opens your records"
+      accessibilityHint="Opens the record"
       style={({ pressed }) => [styles.recordRow, !first && styles.recordDivider, pressed && styles.pressed]}
     >
-      <RecordThumbnail photoPath={plant.photo_url} />
+      <PlantThumbnail photoPath={plant.photo_url} size={THUMBNAIL_SIZE} />
       <View style={styles.recordText}>
         {species ? (
           <ScientificName style={styles.recordName}>
@@ -267,44 +275,6 @@ function RecentRecord({ plant, species, now, first, onPress }) {
         </View>
       </View>
     </Pressable>
-  )
-}
-
-// The record's photo, signed the same way My Records loads it. A leaf icon when there is no photo
-// or it can't be loaded.
-function RecordThumbnail({ photoPath }) {
-  const { getPlantPhotoUrl } = usePlantPhoto()
-  const [photoUrl, setPhotoUrl] = useState(null)
-  const [failed, setFailed] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    if (!photoPath) return undefined
-    getPlantPhotoUrl(photoPath).then((result) => {
-      if (!cancelled && !result.error) setPhotoUrl(result.data)
-    })
-    return () => {
-      cancelled = true
-    }
-    // getPlantPhotoUrl is a new function on every render; only a new path needs a new URL
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [photoPath])
-
-  if (!photoUrl || failed) {
-    return (
-      <View style={[styles.thumbnail, styles.thumbnailEmpty]}>
-        <Ionicons name="leaf-outline" size={22} color={theme.colors.textSecondary} />
-      </View>
-    )
-  }
-  return (
-    <Image
-      source={{ uri: photoUrl }}
-      style={styles.thumbnail}
-      resizeMode="cover"
-      onError={() => setFailed(true)}
-      accessibilityIgnoresInvertColors
-    />
   )
 }
 
@@ -452,16 +422,6 @@ const styles = StyleSheet.create({
   recordDivider: {
     borderTopWidth: 1,
     borderTopColor: theme.colors.border,
-  },
-  thumbnail: {
-    width: THUMBNAIL_SIZE,
-    height: THUMBNAIL_SIZE,
-    borderRadius: theme.radius,
-    backgroundColor: theme.colors.surface,
-  },
-  thumbnailEmpty: {
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   recordText: {
     flex: 1,

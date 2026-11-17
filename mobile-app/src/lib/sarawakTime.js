@@ -19,6 +19,7 @@ function sarawakParts(value) {
     day: shifted.getUTCDate(),
     weekday: shifted.getUTCDay(),
     hour: shifted.getUTCHours(),
+    minute: shifted.getUTCMinutes(),
   }
 }
 
@@ -34,6 +35,15 @@ export function greetingFor(now) {
 export function formatDate(value) {
   const parts = sarawakParts(value)
   return parts ? `${parts.day} ${MONTHS[parts.month]} ${parts.year}` : null
+}
+
+// "17 Nov 2026, 6:45 pm", or null for no value. The time is put together by hand, since
+// toLocaleTimeString's output (24-hour clock, "PM" or "p.m.") differs between Android and iOS.
+export function formatDateTime(value) {
+  const parts = sarawakParts(value)
+  if (!parts) return null
+  const minutes = String(parts.minute).padStart(2, '0')
+  return `${formatDate(value)}, ${parts.hour % 12 || 12}:${minutes} ${parts.hour < 12 ? 'am' : 'pm'}`
 }
 
 // "Tuesday, 17 Nov 2026", or null for no value

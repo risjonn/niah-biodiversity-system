@@ -15,6 +15,8 @@ import StaffHomeScreen from '../screens/StaffHomeScreen'
 import GuestScanScreen from '../screens/GuestScanScreen'
 import SettingsScreen from '../screens/SettingsScreen'
 import PlantSpeciesScreen from '../screens/PlantSpeciesScreen'
+import RecordDetailScreen from '../screens/RecordDetailScreen'
+import SpeciesDetailScreen from '../screens/SpeciesDetailScreen'
 
 const Stack = createNativeStackNavigator()
 const Tab = createBottomTabNavigator()
@@ -92,16 +94,19 @@ function BotanistTabs() {
 
 const signedInScreens = {
   BotanistTabs: { component: BotanistTabs, options: { headerShown: false } },
+  // Above the tabs, with a back button. Each sets its title once its record or species loads.
+  RecordDetail: { component: RecordDetailScreen, options: { title: 'Plant record' } },
+  SpeciesDetail: { component: SpeciesDetailScreen, options: { title: 'Species' } },
   StaffHome: { component: StaffHomeScreen, options: { title: 'Staff Dashboard' } },
   Settings: { component: SettingsScreen },
 }
 
 // Screens each role can open once signed in. Each role lands on the first screen in its list
 // (order is used instead of initialRouteName, which the navigator only reads when first created).
-// Botanists get every screen through their tabs. Conservation officers' and admins' own screens
+// Botanists get every screen through their tabs, with the detail screens stacked above them. Conservation officers' and admins' own screens
 // come in later issues, so for now they land on a placeholder dashboard.
 const screensByRole = {
-  botanist: ['BotanistTabs'],
+  botanist: ['BotanistTabs', 'RecordDetail', 'SpeciesDetail'],
   conservation_officer: ['StaffHome', 'Settings'],
   admin: ['StaffHome', 'Settings'],
 }
