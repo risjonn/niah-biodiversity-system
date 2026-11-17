@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Box,
@@ -54,11 +55,18 @@ const COLUMNS = [
 export default function PlantRecords() {
   const { fetchPlantRecords, getPlantPhotoUrls } = usePlants()
   const { fetchSpecies } = useSpecies()
-  const [status, setStatus] = useState('')
+  // The status filter lives in the URL (/records?status=approved), so a link can open the page
+  // already filtered and Back steps through the chips. Anything but a known status means All.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const statusParam = searchParams.get('status')
+  const status = reviewStatuses.includes(statusParam) ? statusParam : ''
   const [speciesId, setSpeciesId] = useState('')
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebouncedValue(search.trim())
-  const [page, setPage] = useState(0)
+  // Kept with the status it was for, so a different status (a chip, or Back/Forward) starts at the
+  // first page, and Back to the status this page was for returns to it
+  const [paging, setPaging] = useState({ status, page: 0 })
+  const page = paging.status === status ? paging.page : 0
   const [speciesOptions, setSpeciesOptions] = useState([])
   // Kept with the filters and page it was loaded for, so a change shows loading again and a slow
   // earlier request can't overwrite a newer one (the same approach as the species list)
@@ -108,6 +116,10 @@ export default function PlantRecords() {
   const urls = photoUrls.key === loadKey ? photoUrls.urls : null
   const hasFilters = Boolean(status || speciesId || search.trim())
 
+  function setPage(nextPage) {
+    setPaging({ status, page: nextPage })
+  }
+
   // Any filter change goes back to the first page
   function changeFilter(setter) {
     return (value) => {
@@ -115,12 +127,23 @@ export default function PlantRecords() {
       setPage(0)
     }
   }
-  const changeStatus = changeFilter(setStatus)
   const changeSpecies = changeFilter(setSpeciesId)
   const changeSearch = changeFilter(setSearch)
 
+  // A new history entry per change, so Back returns to the previous filter. The first page
+  // follows from paging being kept per status.
+  function changeStatus(value) {
+    if ((statusParam ?? '') === value) return
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      if (value) next.set('status', value)
+      else next.delete('status')
+      return next
+    })
+  }
+
   function clearFilters() {
-    setStatus('')
+    changeStatus('')
     setSpeciesId('')
     setSearch('')
     setPage(0)

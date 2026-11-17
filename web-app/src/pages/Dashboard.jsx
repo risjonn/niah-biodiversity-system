@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link as RouterLink } from 'react-router-dom'
-import { Button, Grid, Stack } from '@mui/material'
+import { Grid, Stack } from '@mui/material'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlined'
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined'
 import LocalFloristOutlinedIcon from '@mui/icons-material/LocalFloristOutlined'
@@ -94,7 +93,7 @@ function greeting(now) {
 // Officers and admins see the same dashboard
 export default function Dashboard() {
   const { fullName } = useAuth()
-  // The sidebar's badge counts (pending reviews for this user, open alerts), not queried again
+  // The sidebar's pending reviews count, not queried again
   const { counts } = useNavCounts()
   // Fixed for this visit, so the greeting and date don't change while the page is open
   const [now] = useState(() => Date.now())
@@ -124,31 +123,12 @@ export default function Dashboard() {
   // Approved records among those recorded this month (Sarawak time), from the records-by-month
   // report the charts below already load. Null until it's back, or if it failed.
   const approvedThisMonth = recordCharts?.data?.months.at(-1)?.approved ?? null
-  const pendingReviews = counts.pendingReviews ?? 0
-  const openAlerts = counts.openAlerts ?? 0
 
   return (
     <Stack spacing={4}>
       <PageHeader
         title={firstName ? `${greeting(now)}, ${firstName}` : greeting(now)}
         subtitle={formatLongDate(now)}
-        action={
-          <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
-            {pendingReviews > 0 ? (
-              <Button component={RouterLink} to="/review" variant="contained">
-                Review {pendingReviews} {pendingReviews === 1 ? 'record' : 'records'}
-              </Button>
-            ) : null}
-            {openAlerts > 0 ? (
-              <Button component={RouterLink} to="/sensors" variant="outlined" color="error">
-                See {openAlerts} {openAlerts === 1 ? 'alert' : 'alerts'}
-              </Button>
-            ) : null}
-            <Button component={RouterLink} to="/records" variant="outlined">
-              Plant records
-            </Button>
-          </Stack>
-        }
       />
 
       <Grid container spacing={3}>
@@ -169,7 +149,8 @@ export default function Dashboard() {
         <CountCard
           title="Approved plants"
           caption="Visible to the public"
-          to="/species"
+          // Plant records with the Approved filter on
+          to="/records?status=approved"
           icon={CheckCircleOutlineIcon}
           color="success"
           loadCount={countApprovedPlants}
