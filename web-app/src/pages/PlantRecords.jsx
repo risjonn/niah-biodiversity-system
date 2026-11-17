@@ -25,10 +25,10 @@ import PrintOutlinedIcon from '@mui/icons-material/PrintOutlined'
 import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
 import PlantRecordPanel from '../components/PlantRecordPanel'
-import PrintLabels from '../components/PrintLabels'
 import TableSkeleton from '../components/TableSkeleton'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { usePlants } from '../hooks/usePlants'
+import { usePrintLabels } from '../hooks/usePrintLabels'
 import { useSpecies } from '../hooks/useSpecies'
 import { formatDateTime } from '../lib/formatDateTime'
 import { formatCoordinates } from '../lib/plantFormat'
@@ -69,7 +69,7 @@ export default function PlantRecords() {
   // Selected records for printing labels, by id, kept across pages and filters
   const [selected, setSelected] = useState(() => new Map())
   const [openRecord, setOpenRecord] = useState(null)
-  const [printing, setPrinting] = useState(false)
+  const { printLabels, printElement } = usePrintLabels()
 
   useEffect(() => {
     let cancelled = false
@@ -162,7 +162,19 @@ export default function PlantRecords() {
               <Button variant="outlined" onClick={() => setSelected(new Map())}>
                 Clear selection
               </Button>
-              <Button variant="contained" startIcon={<PrintOutlinedIcon />} onClick={() => setPrinting(true)}>
+              <Button
+                variant="contained"
+                startIcon={<PrintOutlinedIcon />}
+                // Prints straight from the click (see usePrintLabels)
+                onClick={() =>
+                  printLabels(
+                    [...selected.values()].map((row) => ({
+                      qrCode: row.qr_code,
+                      scientificName: row.species?.scientific_name,
+                    })),
+                  )
+                }
+              >
                 Print labels ({selected.size})
               </Button>
             </Stack>
@@ -278,15 +290,7 @@ export default function PlantRecords() {
         plant={openRecord}
         onClose={() => setOpenRecord(null)}
       />
-      {printing ? (
-        <PrintLabels
-          labels={[...selected.values()].map((row) => ({
-            qrCode: row.qr_code,
-            scientificName: row.species?.scientific_name,
-          }))}
-          onDone={() => setPrinting(false)}
-        />
-      ) : null}
+      {printElement}
     </Stack>
   )
 }

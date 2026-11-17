@@ -18,10 +18,10 @@ import CloseIcon from '@mui/icons-material/Close'
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined'
 import PrintOutlinedIcon from '@mui/icons-material/PrintOutlined'
 import PlantPhoto from './PlantPhoto'
-import PrintLabels from './PrintLabels'
 import QrCode from './QrCode'
 import { useToast } from '../context/ToastContext'
 import { usePlants } from '../hooks/usePlants'
+import { usePrintLabels } from '../hooks/usePrintLabels'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
 import { formatDate, formatDateTime } from '../lib/formatDateTime'
 import { mapUrl } from '../lib/mapUrl'
@@ -203,7 +203,7 @@ function ReviewStatus({ plant, onClose }) {
 // The tag's QR code (encoded like the mobile app's), with download and print
 function QrSection({ plant }) {
   const toast = useToast()
-  const [printing, setPrinting] = useState(false)
+  const { printLabels, printElement } = usePrintLabels()
 
   async function handleDownload() {
     try {
@@ -227,17 +227,19 @@ function QrSection({ plant }) {
           <Button variant="outlined" startIcon={<DownloadOutlinedIcon />} onClick={handleDownload}>
             Download PNG
           </Button>
-          <Button variant="outlined" startIcon={<PrintOutlinedIcon />} onClick={() => setPrinting(true)}>
+          <Button
+            variant="outlined"
+            startIcon={<PrintOutlinedIcon />}
+            // Prints straight from the click (see usePrintLabels)
+            onClick={() =>
+              printLabels([{ qrCode: plant.qr_code, scientificName: plant.species?.scientific_name }])
+            }
+          >
             Print label
           </Button>
         </Stack>
       </Stack>
-      {printing ? (
-        <PrintLabels
-          labels={[{ qrCode: plant.qr_code, scientificName: plant.species?.scientific_name }]}
-          onDone={() => setPrinting(false)}
-        />
-      ) : null}
+      {printElement}
     </Paper>
   )
 }

@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Box, GlobalStyles } from '@mui/material'
 import QrCode from './QrCode'
@@ -6,34 +5,33 @@ import { tokens } from '../theme/theme'
 
 const PRINT_ROOT_ID = 'print-labels'
 
+// Printed sizes. The QR is 40 mm square including its 4-module quiet zone. A4 is 210 x 297 mm;
+// with a 10 mm page margin that leaves 190 x 277 mm: 3 columns of 62 mm (186 mm) and 4 rows of
+// 68 mm (272 mm), so 12 labels to a page.
+const QR_SIZE = '40mm'
+const CELL_WIDTH = '62mm'
+const CELL_HEIGHT = '68mm'
+const PAGE_MARGIN = '10mm'
+// Smallest text: "Niah National Park" at 8 pt, the scientific name at 10 pt (at least 9 pt)
+const CODE_SIZE = '12pt'
+const NAME_SIZE = '10pt'
+const PARK_SIZE = '8pt'
+
 // Plant tag labels for printing: the QR code, the code, the scientific name and "Niah National
-// Park". While mounted it opens the browser's print dialog once, and calls onDone when printing
-// finishes or is cancelled. On screen nothing shows; in print only the labels do (the app, the
+// Park". Only lays them out: printing is started by usePrintLabels (hooks/usePrintLabels.jsx),
+// straight from the click. On screen nothing shows; in print only the labels do (the app, the
 // sidebar and any open drawer are hidden).
 //
 // `labels` is [{ qrCode, scientificName }]. They are laid out on A4 in a 3 x 4 grid of cut-out
 // cells (12 to a page); more than 12 carry on to the next page.
-export default function PrintLabels({ labels, onDone }) {
-  const printed = useRef(false)
-
-  useEffect(() => {
-    // Once only (React's strict mode runs effects twice in development)
-    if (printed.current) return undefined
-    printed.current = true
-    window.addEventListener('afterprint', onDone, { once: true })
-    // After this render is on the page, so the labels are in what gets printed
-    const timer = setTimeout(() => window.print(), 0)
-    return () => clearTimeout(timer)
-  }, [onDone])
-
-  // Not removed on unmount: afterprint (once) removes itself, and onDone unmounts this
+export default function PrintLabels({ labels }) {
   return createPortal(
     <>
       <GlobalStyles
         styles={{
           [`@media screen`]: { [`#${PRINT_ROOT_ID}`]: { display: 'none !important' } },
           [`@media print`]: {
-            '@page': { size: 'A4 portrait', margin: '12mm' },
+            '@page': { size: 'A4 portrait', margin: PAGE_MARGIN },
             // Everything but the labels: the app root, drawers, dialogs, snackbars
             [`body > *:not(#${PRINT_ROOT_ID})`]: { display: 'none !important' },
             body: { background: 'none !important' },
@@ -45,8 +43,8 @@ export default function PrintLabels({ labels, onDone }) {
         sx={{
           display: 'grid',
           // One label is centred at the top of the page; several fill a 3-column grid
-          gridTemplateColumns: labels.length === 1 ? '62mm' : 'repeat(3, 62mm)',
-          gridAutoRows: '66mm',
+          gridTemplateColumns: labels.length === 1 ? CELL_WIDTH : `repeat(3, ${CELL_WIDTH})`,
+          gridAutoRows: CELL_HEIGHT,
           justifyContent: 'center',
           fontFamily: 'Inter, sans-serif',
           color: tokens.textPrimary,
@@ -66,16 +64,19 @@ export default function PrintLabels({ labels, onDone }) {
               breakInside: 'avoid',
               textAlign: 'center',
               px: '3mm',
+              overflow: 'hidden',
             }}
           >
-            <QrCode value={label.qrCode} size="38mm" />
-            <Box sx={{ fontSize: '12pt', fontWeight: 600, letterSpacing: '0.02em' }}>
+            <QrCode value={label.qrCode} size={QR_SIZE} />
+            <Box sx={{ fontSize: CODE_SIZE, fontWeight: 600, letterSpacing: '0.02em', lineHeight: 1.2 }}>
               {label.qrCode}
             </Box>
-            <Box sx={{ fontSize: '10pt', fontStyle: 'italic', lineHeight: 1.2 }}>
+            <Box sx={{ fontSize: NAME_SIZE, fontStyle: 'italic', lineHeight: 1.2 }}>
               {label.scientificName ?? 'Unknown species'}
             </Box>
-            <Box sx={{ fontSize: '8pt', color: tokens.textSecondary }}>Niah National Park</Box>
+            <Box sx={{ fontSize: PARK_SIZE, color: tokens.textSecondary, lineHeight: 1.2 }}>
+              Niah National Park
+            </Box>
           </Box>
         ))}
       </Box>
