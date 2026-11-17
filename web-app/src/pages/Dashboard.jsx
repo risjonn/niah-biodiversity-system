@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Grid, Stack } from '@mui/material'
+import { Link as RouterLink } from 'react-router-dom'
+import { Button, Grid, Stack } from '@mui/material'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlined'
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined'
 import LocalFloristOutlinedIcon from '@mui/icons-material/LocalFloristOutlined'
@@ -18,15 +19,17 @@ import {
 } from 'recharts'
 import PageHeader from '../components/PageHeader'
 import ChartCard from '../components/ChartCard'
+import RecentActivity from '../components/RecentActivity'
 import StatCard from '../components/StatCard'
 import { useAuth } from '../context/AuthContext'
+import { useNavCounts } from '../context/NavCountsContext'
 import { usePlants } from '../hooks/usePlants'
 import { useReports } from '../hooks/useReports'
 import { useSensors } from '../hooks/useSensors'
 import { useSpecies } from '../hooks/useSpecies'
 import { conservationStatusLabels } from '../lib/conservationStatus'
+import { formatLongDate, sarawakHourOf } from '../lib/formatDateTime'
 import { formatMonth } from '../lib/reportExport'
-import { roleLabels } from '../lib/roles'
 import { chartTokens, theme, tokens } from '../theme/theme'
 
 const MONTHS_SHOWN = 12
@@ -79,9 +82,24 @@ const tooltipProps = {
 // status must show its value, so a 0 is drawn as a sliver on the baseline with "0" beside it.
 const ZERO_BAR_SIZE = 2
 
+// "Good morning" before noon, "Good afternoon" until 6 pm, "Good evening" after, in Sarawak time
+// whatever the viewer's own timezone is
+function greeting(now) {
+  const hour = sarawakHourOf(now)
+  if (hour < 12) return 'Good morning'
+  if (hour < 18) return 'Good afternoon'
+  return 'Good evening'
+}
+
+// Officers and admins see the same dashboard
 export default function Dashboard() {
-  const { fullName, role } = useAuth()
-  const { countPendingReviews, countApprovedPlants } = usePlants()
+  const { fullName } = useAuth()
+  // The sidebar's badge counts (pending reviews for this user, open alerts), not queried again
+  const { counts } = useNavCounts()
+  // Fixed for this visit, so the greeting and date don't change while the page is open
+  const [now] = useState(() => Date.now())
+  const firstName = fullName?.trim().split(/\s+/)[0]
+  const { countApprovedPlants } = usePlants()
   const { countSpecies, countSpeciesByConservationStatus } = useSpecies()
   const { countOpenAlerts } = useSensors()
   const { fetchRecordsByMonth } = useReports()
@@ -103,22 +121,51 @@ export default function Dashboard() {
   const recordCharts = useLoaded(loadRecordCharts)
   const conservation = useLoaded(countSpeciesByConservationStatus)
 
+  // Approved records among those recorded this month (Sarawak time), from the records-by-month
+  // report the charts below already load. Null until it's back, or if it failed.
+  const approvedThisMonth = recordCharts?.data?.months.at(-1)?.approved ?? null
+  const pendingReviews = counts.pendingReviews ?? 0
+  const openAlerts = counts.openAlerts ?? 0
+
   return (
     <Stack spacing={4}>
       <PageHeader
-        title={fullName ? `Welcome, ${fullName}` : 'Welcome'}
-        subtitle={`Signed in as ${roleLabels[role]}`}
+        title={firstName ? `${greeting(now)}, ${firstName}` : greeting(now)}
+        subtitle={formatLongDate(now)}
+        action={
+          <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+            {pendingReviews > 0 ? (
+              <Button component={RouterLink} to="/review" variant="contained">
+                Review {pendingReviews} {pendingReviews === 1 ? 'record' : 'records'}
+              </Button>
+            ) : null}
+            {openAlerts > 0 ? (
+              <Button component={RouterLink} to="/sensors" variant="outlined" color="error">
+                See {openAlerts} {openAlerts === 1 ? 'alert' : 'alerts'}
+              </Button>
+            ) : null}
+            <Button component={RouterLink} to="/records" variant="outlined">
+              Plant records
+            </Button>
+          </Stack>
+        }
       />
 
       <Grid container spacing={3}>
-        <CountCard
-          title="Pending reviews for you"
-          caption="Records by other people"
-          to="/review"
-          icon={FactCheckOutlinedIcon}
-          color="warning"
-          loadCount={countPendingReviews}
-        />
+        {/* The sidebar badge's count (NavCountsContext), not a query of its own, so the two
+            always match */}
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+          <StatCard
+            icon={FactCheckOutlinedIcon}
+            color="warning"
+            label="Pending reviews for you"
+            caption="Records by other people"
+            to="/review"
+            loading={counts.pendingReviews == null && !counts.errors.pendingReviews}
+            error={counts.errors.pendingReviews}
+            value={counts.pendingReviews == null ? null : formatCount(counts.pendingReviews)}
+          />
+        </Grid>
         <CountCard
           title="Approved plants"
           caption="Visible to the public"
@@ -126,6 +173,7 @@ export default function Dashboard() {
           icon={CheckCircleOutlineIcon}
           color="success"
           loadCount={countApprovedPlants}
+          trend={approvedThisMonth > 0 ? `+${formatCount(approvedThisMonth)} new this month` : null}
         />
         <CountCard
           title="Species"
@@ -144,6 +192,8 @@ export default function Dashboard() {
           loadCount={countOpenAlerts}
         />
       </Grid>
+
+      <RecentActivity />
 
       <Grid container spacing={3}>
         <Grid size={12}>
@@ -180,7 +230,7 @@ function useLoaded(load) {
 }
 
 // A clickable card showing one total, loaded on its own
-function CountCard({ title, caption, to, icon, color, loadCount }) {
+function CountCard({ title, caption, to, icon, color, loadCount, trend }) {
   const result = useLoaded(loadCount)
 
   return (
@@ -191,6 +241,7 @@ function CountCard({ title, caption, to, icon, color, loadCount }) {
         label={title}
         caption={caption}
         to={to}
+        trend={trend}
         loading={!result}
         error={result?.error ?? null}
         value={result && !result.error ? formatCount(result.data) : null}

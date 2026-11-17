@@ -11,11 +11,17 @@ const NavCountsContext = createContext(null)
 // open alerts count itself, from the list it has just loaded (setOpenAlertsCount), so the badge
 // and that list always match.
 // A count is null while unknown or if it failed to load; the badge is hidden then, as at 0.
+// errors.<count> holds the message when it failed, so the dashboard card can tell loading from
+// failed (the badge doesn't need to).
 export function NavCountsProvider({ children }) {
   const { countPendingReviews } = usePlants()
   const { countOpenAlerts } = useSensors()
   const { pathname } = useLocation()
-  const [counts, setCounts] = useState({ pendingReviews: null, openAlerts: null })
+  const [counts, setCounts] = useState({
+    pendingReviews: null,
+    openAlerts: null,
+    errors: { pendingReviews: null, openAlerts: null },
+  })
   // Bumped whenever a count is asked for or set. An answer only applies if its count hasn't been
   // asked for or set since, so a slow earlier request can never overwrite a newer value.
   const versions = useRef({ pendingReviews: 0, openAlerts: 0 })
@@ -32,12 +38,20 @@ export function NavCountsProvider({ children }) {
     setCounts((current) => ({
       pendingReviews: reviewsCurrent ? (reviews.error ? null : reviews.data) : current.pendingReviews,
       openAlerts: alertsCurrent ? (alerts.error ? null : alerts.data) : current.openAlerts,
+      errors: {
+        pendingReviews: reviewsCurrent ? reviews.error : current.errors.pendingReviews,
+        openAlerts: alertsCurrent ? alerts.error : current.errors.openAlerts,
+      },
     }))
   }, [countPendingReviews, countOpenAlerts])
 
   const setOpenAlertsCount = useCallback((count) => {
     versions.current.openAlerts += 1
-    setCounts((current) => ({ ...current, openAlerts: count }))
+    setCounts((current) => ({
+      ...current,
+      openAlerts: count,
+      errors: { ...current.errors, openAlerts: null },
+    }))
   }, [])
 
   useEffect(() => {

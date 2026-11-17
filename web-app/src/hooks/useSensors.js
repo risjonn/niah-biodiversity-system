@@ -58,6 +58,7 @@ export function useSensors() {
   return {
     getNodeStatus,
     getAlerts,
+    getRecentAlerts,
     countOpenAlerts,
     acknowledgeAlert,
     getRecentReadings,
@@ -74,6 +75,20 @@ async function getNodeStatus() {
     .from('sensor_node_latest')
     .select('*')
     .order('node_identifier')
+
+  if (error) return { data: [], error: sensorErrorMessage(error) }
+  return { data, error: null }
+}
+
+// The newest alerts, open or acknowledged, for the dashboard. Each comes with its node, and the
+// reading that raised it (alerts.sensor_reading_id, 009) as `reading`; null for alerts without
+// one. Read-only; row-level security limits alerts and readings to staff.
+async function getRecentAlerts(limit = 6) {
+  const { data, error } = await supabase
+    .from('alerts')
+    .select(`${ALERT_WITH_NODE}, reading:sensor_readings(temperature, humidity, motion_duration_seconds)`)
+    .order('created_at', { ascending: false })
+    .limit(limit)
 
   if (error) return { data: [], error: sensorErrorMessage(error) }
   return { data, error: null }

@@ -35,6 +35,7 @@ import { useNavCounts } from '../context/NavCountsContext'
 import { useToast } from '../context/ToastContext'
 import SensorCharts from '../components/SensorCharts'
 import { useSensors } from '../hooks/useSensors'
+import { alertTypeLabels } from '../lib/alerts'
 import { mapUrl } from '../lib/mapUrl'
 // Battery levels below this (in %) are shown in the error colour. Shared with the battery chart.
 import { LOW_BATTERY_PERCENT } from '../lib/sensorCharts'
@@ -46,15 +47,6 @@ const OFFLINE_AFTER_MS = 15 * 60 * 1000
 
 // The readings table's headings, shared with its loading skeleton
 const READING_COLUMNS = ['Recorded', 'Temperature', 'Humidity', 'Motion']
-
-// Matches the alert_type enum in database/schema/001_initial_schema.sql. Nothing raises
-// node_offline yet; offline status is worked out on this page from last_received_at.
-const alertTypeLabels = {
-  motion_detected: 'Motion detected',
-  temperature_anomaly: 'Temperature out of range',
-  humidity_anomaly: 'Humidity out of range',
-  node_offline: 'Node offline',
-}
 
 // Matches the alert_severity enum. MUI's warning colour is the alert token, which
 // docs/design-system.md reserves for warnings and sensor alerts.

@@ -60,6 +60,20 @@ export function formatTime(value) {
   return parts ? timeText(parts) : null
 }
 
+// The weekday in Sarawak, e.g. "Tuesday" (en-GB weekday names are the same in every browser)
+const kuchingWeekday = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kuching', weekday: 'long' })
+
+// "Tuesday, 17 Nov 2026", or null for no value
+export function formatLongDate(value) {
+  const parts = partsOf(value)
+  return parts ? `${kuchingWeekday.format(new Date(value))}, ${dateText(parts)}` : null
+}
+
+// The hour in Sarawak, 0 to 23, e.g. for a greeting by time of day
+export function sarawakHourOf(value) {
+  return partsOf(value)?.hour ?? null
+}
+
 // "2 pm", the hour on its own, or null for no value. For chart axes, where the minutes are
 // always :00.
 export function formatHour(value) {
