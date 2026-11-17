@@ -63,7 +63,7 @@ export default function Login() {
   return (
     <Stack component="form" spacing={2} onSubmit={handleSubmit} noValidate>
       <Typography variant="h2">Staff sign in</Typography>
-      <Typography variant="body2" color="text.secondary">
+      <Typography variant="body2" color="textSecondary">
         For conservation officers and admins.
       </Typography>
 
@@ -127,7 +127,7 @@ export default function Login() {
       >
         {submitting ? 'Signing in…' : 'Sign in'}
       </Button>
-      <Typography variant="body2" color="text.secondary">
+      <Typography variant="body2" color="textSecondary">
         Accounts are created by an admin. Ask your admin if you need access.
       </Typography>
     </Stack>

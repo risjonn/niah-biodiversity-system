@@ -34,7 +34,7 @@ export default function PageHeader({ title, subtitle, action }) {
       <Stack spacing={0.5} sx={{ minWidth: 0 }}>
         <Typography variant="h1">{title}</Typography>
         {subtitle ? (
-          <Typography variant="body1" color="text.secondary">
+          <Typography variant="body1" color="textSecondary">
             {subtitle}
           </Typography>
         ) : null}

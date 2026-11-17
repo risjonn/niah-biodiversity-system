@@ -38,7 +38,7 @@ export default function StatCard({
           <Icon aria-hidden="true" />
         </Box>
         <Stack spacing={0.5} sx={{ minWidth: 0, flexGrow: 1 }}>
-          <Typography variant="body2" component="h2" color="text.secondary" sx={{ fontWeight: 500 }}>
+          <Typography variant="body2" component="h2" color="textSecondary" sx={{ fontWeight: 500 }}>
             {label}
           </Typography>
           {error ? <Alert severity="error">{error}</Alert> : null}
@@ -56,7 +56,7 @@ export default function StatCard({
             </Typography>
           ) : null}
           {caption ? (
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="textSecondary">
               {caption}
             </Typography>
           ) : null}

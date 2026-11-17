@@ -161,12 +161,12 @@ function SpeciesContent({ species, plants, plantsError, onRetry }) {
           alt={`Reference photo of ${species.scientific_name}`}
         />
         <Stack spacing={1} sx={{ alignItems: 'flex-start' }}>
-          <Typography variant="body1" color="text.secondary">
+          <Typography variant="body1" color="textSecondary">
             {species.family ? `Family: ${species.family}` : 'Family not recorded yet'}
           </Typography>
           <Chip label={statusLabel} color={conservationStatusChipColor(status)} />
           {species.updated_at ? (
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="textSecondary">
               Last updated {formatDateTime(species.updated_at)}
             </Typography>
           ) : null}
@@ -272,7 +272,7 @@ function TextSection({ title, text }) {
             {value}
           </Typography>
         ) : (
-          <Typography variant="body1" color="text.secondary">
+          <Typography variant="body1" color="textSecondary">
             Not recorded yet
           </Typography>
         )}
@@ -335,7 +335,7 @@ function ReferencePhoto({ url, alt }) {
 function PhotoMessage({ children }) {
   return (
     <Stack sx={{ height: '100%', alignItems: 'center', justifyContent: 'center', p: 2 }}>
-      <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+      <Typography variant="body2" color="textSecondary" sx={{ textAlign: 'center' }}>
         {children}
       </Typography>
     </Stack>
@@ -376,7 +376,7 @@ function SpeciesRecords({ plants, error, onRetry }) {
                   <Typography variant="h2" component="p">
                     {counts[status]}
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="textSecondary">
                     {reviewStatusLabels[status]}
                   </Typography>
                 </Box>

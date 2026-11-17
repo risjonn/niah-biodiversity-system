@@ -72,17 +72,24 @@ const HOUR_MS = 60 * MINUTE_MS
 const DAY_MS = 24 * HOUR_MS
 
 // How long before `now` (a Date.now() value) `value` was, e.g. "just now", "2 min ago",
-// "3 h ago", "5 days ago". Older than a week falls back to the full date. A time slightly in the
-// future (a device clock running ahead) reads as "just now".
-export function formatRelativeTime(value, now) {
+// "3 h ago", "5 days ago". Older than a week falls back to the full date, unless `longAges` is set:
+// then it carries on in weeks, months and years ("3 weeks ago"), for lists sorted by how long
+// something has waited. A time slightly in the future (a device clock running ahead) reads as
+// "just now".
+export function formatRelativeTime(value, now, { longAges = false } = {}) {
   const elapsed = now - new Date(value).getTime()
 
   if (elapsed < MINUTE_MS) return 'just now'
   if (elapsed < HOUR_MS) return `${Math.floor(elapsed / MINUTE_MS)} min ago`
   if (elapsed < DAY_MS) return `${Math.floor(elapsed / HOUR_MS)} h ago`
-  if (elapsed < 7 * DAY_MS) {
-    const days = Math.floor(elapsed / DAY_MS)
-    return `${days} ${days === 1 ? 'day' : 'days'} ago`
-  }
-  return formatDateTime(value)
+  if (elapsed < 7 * DAY_MS) return ago(Math.floor(elapsed / DAY_MS), 'day')
+  if (!longAges) return formatDateTime(value)
+  if (elapsed < 30 * DAY_MS) return ago(Math.floor(elapsed / (7 * DAY_MS)), 'week')
+  // At most 11: 360-364 days is still "11 months", not "12 months"
+  if (elapsed < 365 * DAY_MS) return ago(Math.min(11, Math.floor(elapsed / (30 * DAY_MS))), 'month')
+  return ago(Math.floor(elapsed / (365 * DAY_MS)), 'year')
+}
+
+function ago(count, unit) {
+  return `${count} ${unit}${count === 1 ? '' : 's'} ago`
 }

@@ -188,7 +188,7 @@ export default function Reports() {
               Download PDF report
             </Button>
           </Stack>
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" color="textSecondary">
             Both dates are included.
           </Typography>
         </Stack>

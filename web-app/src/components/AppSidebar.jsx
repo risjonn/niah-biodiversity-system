@@ -292,7 +292,7 @@ function UserCard({ collapsed, onChangePassword }) {
             <Typography variant="body2" noWrap sx={{ fontWeight: 500 }}>
               {fullName}
             </Typography>
-            <Typography variant="caption" component="div" color="text.secondary" noWrap>
+            <Typography variant="caption" component="div" color="textSecondary" noWrap>
               {roleLabel}
             </Typography>
           </Box>

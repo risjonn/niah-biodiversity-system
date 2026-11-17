@@ -352,7 +352,7 @@ function PhotoPreview({ url }) {
 function PhotoMessage({ children }) {
   return (
     <Stack sx={{ height: '100%', alignItems: 'center', justifyContent: 'center', p: 2 }}>
-      <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+      <Typography variant="body2" color="textSecondary" sx={{ textAlign: 'center' }}>
         {children}
       </Typography>
     </Stack>

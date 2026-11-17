@@ -30,6 +30,7 @@ export function usePlants() {
       if (!REVIEW_STATUSES.includes(status)) {
         return { data: null, error: 'Choose whether to approve or reject this record.' }
       }
+      // A rejection needs a reason: the botanist sees it in My Records (rejection_reason, 001)
       const reason = rejectionReason?.trim()
       if (status === 'rejected' && !reason) {
         return { data: null, error: 'Give a reason for rejecting this record.' }

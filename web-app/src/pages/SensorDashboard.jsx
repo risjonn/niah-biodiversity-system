@@ -23,19 +23,18 @@ import {
   TableHead,
   TableRow,
   Tabs,
-  Tooltip,
   Typography,
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
+import RelativeTime from '../components/RelativeTime'
 import TableSkeleton from '../components/TableSkeleton'
 import { useAuth } from '../context/AuthContext'
 import { useNavCounts } from '../context/NavCountsContext'
 import { useToast } from '../context/ToastContext'
 import SensorCharts from '../components/SensorCharts'
 import { useSensors } from '../hooks/useSensors'
-import { formatDateTime, formatRelativeTime } from '../lib/formatDateTime'
 import { mapUrl } from '../lib/mapUrl'
 // Battery levels below this (in %) are shown in the error colour. Shared with the battery chart.
 import { LOW_BATTERY_PERCENT } from '../lib/sensorCharts'
@@ -159,7 +158,7 @@ export default function SensorDashboard() {
         action={
           snapshot ? (
             <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" color="textSecondary">
                 Last updated <RelativeTime value={snapshot.loadedAt} now={checkedAt} />
               </Typography>
               <Button
@@ -245,7 +244,7 @@ function SummaryCard({ title, value, detail, detailColor = 'text.secondary' }) {
     <Grid size={{ xs: 6, md: 3 }}>
       <Card variant="outlined" sx={{ height: '100%' }}>
         <CardContent>
-          <Typography variant="body2" color="text.secondary" component="h2">
+          <Typography variant="body2" color="textSecondary" component="h2">
             {title}
           </Typography>
           <Typography variant="h1" component="p">
@@ -361,11 +360,11 @@ function AlertItem({ alert, now, currentUserId, isSaving, onAcknowledge }) {
             </Typography>
           </Stack>
           {alert.message ? <Typography variant="body2">{alert.message}</Typography> : null}
-          <Typography variant="caption" color="text.secondary">
+          <Typography variant="caption" color="textSecondary">
             Node {nodeName} · <RelativeTime value={alert.created_at} now={now} />
           </Typography>
           {alert.is_acknowledged ? (
-            <Typography variant="caption" color="text.secondary">
+            <Typography variant="caption" color="textSecondary">
               Acknowledged by {acknowledgedByName(alert, currentUserId)}
               {alert.acknowledged_at ? (
                 <>
@@ -408,7 +407,7 @@ function NodesSection({ nodes, now }) {
           <EmptyState message="No sensor nodes yet" dense />
         ) : (
           <>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="textSecondary">
               Select a node to see its latest readings.
             </Typography>
             {/* Scrolls sideways on a narrow screen instead of squeezing the columns */}
@@ -643,7 +642,7 @@ function ThresholdsCard() {
         ) : null}
 
         {!isLoading && !result.error && !limits ? (
-          <Typography variant="body1" color="text.secondary">
+          <Typography variant="body1" color="textSecondary">
             No global alert limits set
           </Typography>
         ) : null}
@@ -656,7 +655,7 @@ function ThresholdsCard() {
               {formatNumber(limits.humidity_min)}–{formatNumber(limits.humidity_max)} %, motion
               lasting {limits.motion_window_seconds} s or longer
             </Typography>
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" color="textSecondary">
               An alert is raised when a reading falls outside these limits. They apply to every
               node that doesn&apos;t have its own limits.
             </Typography>
@@ -664,17 +663,6 @@ function ThresholdsCard() {
         ) : null}
       </Stack>
     </Paper>
-  )
-}
-
-// "2 min ago", with the full date and time on hover
-function RelativeTime({ value, now }) {
-  return (
-    <Tooltip title={formatDateTime(value)}>
-      <Box component="time" dateTime={new Date(value).toISOString()}>
-        {formatRelativeTime(value, now)}
-      </Box>
-    </Tooltip>
   )
 }
 

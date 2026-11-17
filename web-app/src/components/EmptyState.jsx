@@ -7,7 +7,7 @@ export default function EmptyState({ message, action, dense = false }) {
   return (
     <Stack spacing={2} sx={{ alignItems: 'center', textAlign: 'center', py: dense ? 3 : 6 }}>
       <EmptyDrawing />
-      <Typography variant="body1" color="text.secondary">
+      <Typography variant="body1" color="textSecondary">
         {message}
       </Typography>
       {action ?? null}

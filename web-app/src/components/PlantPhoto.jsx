@@ -7,31 +7,36 @@ import { usePlants } from '../hooks/usePlants'
 // photo_url, or null when it has none. `maxHeight` caps the photo (any sx value), so a tall photo
 // doesn't push the rest of its dialog or panel out of view.
 export default function PlantPhoto({ path, alt, maxHeight = { xs: '40vh', md: '60vh' } }) {
-  if (!path) {
-    return (
-      <PhotoFrame>
-        <Stack spacing={1} sx={{ alignItems: 'center', color: 'text.secondary', py: 4 }}>
-          <ImageNotSupportedOutlinedIcon aria-hidden="true" />
-          <Typography variant="body2">No photo with this record</Typography>
-        </Stack>
-      </PhotoFrame>
-    )
-  }
+  if (!path) return <NoPhoto />
   // Keyed by path, so another record's photo starts from a fresh load
   return <SignedPhoto key={path} path={path} alt={alt} maxHeight={maxHeight} />
 }
 
+// The placeholder for a record without a photo. `fill` stretches it to its container's height
+// (e.g. a card's fixed-ratio photo area).
+export function NoPhoto({ fill = false }) {
+  return (
+    <PhotoFrame fill={fill}>
+      <Stack spacing={1} sx={{ alignItems: 'center', color: 'text.secondary', py: 4 }}>
+        <ImageNotSupportedOutlinedIcon aria-hidden="true" />
+        <Typography variant="body2">No photo with this record</Typography>
+      </Stack>
+    </PhotoFrame>
+  )
+}
+
 // The grey box the photo (or its loading, error or missing state) sits in
-function PhotoFrame({ children }) {
+function PhotoFrame({ children, fill = false }) {
   return (
     <Box
       sx={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 1,
+        borderRadius: fill ? 0 : 1,
         bgcolor: 'background.default',
         overflow: 'hidden',
+        height: fill ? '100%' : undefined,
       }}
     >
       {children}

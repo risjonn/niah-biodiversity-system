@@ -159,7 +159,7 @@ export default function SensorCharts({ nodes, refreshKey }) {
       >
         <Stack spacing={0.5}>
           <Typography variant="h2">Readings</Typography>
-          <Typography variant="body2" color="text.secondary">
+          <Typography variant="body2" color="textSecondary">
             Times are Sarawak time (UTC+8).
           </Typography>
         </Stack>
