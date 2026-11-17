@@ -5,7 +5,9 @@ import { containsAnyFilter, countResult, queryErrorMessage } from '../lib/queryH
 import { conservationStatuses } from '../lib/conservationStatus'
 
 // The species columns callers may set. id, created_by and the timestamps are managed here or by
-// the database, so they are never taken from the caller.
+// the database, so they are never taken from the caller. reference_photo_url isn't either: photos
+// are saved in species_photos, and a trigger keeps reference_photo_url as the cover
+// (database/schema/017), which older app versions and the species cards read.
 const EDITABLE_FIELDS = [
   'scientific_name',
   'common_name',
@@ -13,8 +15,10 @@ const EDITABLE_FIELDS = [
   'description',
   'conservation_status',
   'cultural_significance',
-  'reference_photo_url',
 ]
+
+// The most photos a species can have (species_photos positions 0 to 4, 017)
+export const MAX_SPECIES_PHOTOS = 5
 
 const SEARCH_COLUMNS = ['scientific_name', 'common_name', 'family']
 
@@ -63,10 +67,114 @@ export function useSpecies() {
     createSpecies,
     updateSpecies,
     deleteSpecies,
+    getSpeciesPhotos,
+    saveSpeciesPhotos,
     speciesPhotoError,
     uploadSpeciesPhoto,
     removeSpeciesPhoto,
   }
+}
+
+// A species' photos, cover first. Resolves to { data: [{ id, url, position }], error }. Public
+// URLs, so nothing needs signing.
+async function getSpeciesPhotos(speciesId) {
+  const { data, error } = await supabase
+    .from('species_photos')
+    .select('id, photo_url, position')
+    .eq('species_id', speciesId)
+    .order('position')
+
+  if (error) return { data: [], error: speciesPhotosErrorMessage(error) }
+  return {
+    data: data.map((row) => ({ id: row.id, url: row.photo_url, position: row.position })),
+    error: null,
+  }
+}
+
+// Saves a species' photos as the form left them.
+// - original: the photos as loaded ([{ id, url, position }]), [] for a new species
+// - photos: the photos to keep, in their new order, cover first: { id, url } for one already
+//   saved, { id: null, url } for a newly uploaded one
+// Removes the photos left out, adds the new ones in free positions, then puts them in order with
+// reorder_species_photos, but only if the order changed. The trigger in 017 then keeps
+// reference_photo_url as the cover. Afterwards, files nothing points at any more are removed from
+// storage: removed photos, and new uploads whose row couldn't be added. Not transactional: on an
+// error, the steps before it stay saved. Resolves to { data: true, error }.
+async function saveSpeciesPhotos(speciesId, { original, photos }) {
+  const keptIds = new Set(photos.filter((photo) => photo.id).map((photo) => photo.id))
+  const kept = original.filter((photo) => keptIds.has(photo.id))
+  const removed = original.filter((photo) => !keptIds.has(photo.id))
+  const added = photos.filter((photo) => !photo.id)
+  // Files to remove from storage at the end
+  const removedUrls = []
+  let unsavedUploadUrls = added.map((photo) => photo.url)
+
+  function finish(error) {
+    // Not awaited: removeSpeciesPhoto never fails and leaving the page doesn't stop it
+    for (const url of [...removedUrls, ...unsavedUploadUrls]) removeSpeciesPhoto(url)
+    return { data: error ? null : true, error }
+  }
+
+  if (removed.length > 0) {
+    const { data, error } = await supabase
+      .from('species_photos')
+      .delete()
+      .eq('species_id', speciesId)
+      .in(
+        'id',
+        removed.map((photo) => photo.id),
+      )
+      .select('photo_url')
+    if (error) return finish(speciesPhotosErrorMessage(error))
+    // Only files whose row really went; RLS refusing the delete returns no rows
+    removedUrls.push(...data.map((row) => row.photo_url))
+  }
+
+  // Every position the kept photos don't use, lowest first, for the new ones
+  const keptPositions = kept.map((photo) => photo.position)
+  const freePositions = [...Array(MAX_SPECIES_PHOTOS).keys()].filter(
+    (position) => !keptPositions.includes(position),
+  )
+  if (added.length > freePositions.length) {
+    return finish(`A species can have at most ${MAX_SPECIES_PHOTOS} photos.`)
+  }
+
+  const newIds = new Map()
+  if (added.length > 0) {
+    const { data, error } = await supabase
+      .from('species_photos')
+      .insert(
+        added.map((photo, index) => ({
+          species_id: speciesId,
+          photo_url: photo.url,
+          position: freePositions[index],
+        })),
+      )
+      .select('id, photo_url')
+    if (error) return finish(speciesPhotosErrorMessage(error))
+    // Each upload has its own random name, so the URL identifies the new row
+    for (const row of data) newIds.set(row.photo_url, row.id)
+    unsavedUploadUrls = []
+  }
+
+  // The order they are in now (by position) against the order asked for
+  const savedOrder = [
+    ...kept.map((photo) => ({ id: photo.id, position: photo.position })),
+    ...added.map((photo, index) => ({ id: newIds.get(photo.url), position: freePositions[index] })),
+  ]
+    .sort((a, b) => a.position - b.position)
+    .map((photo) => photo.id)
+  const wantedOrder = photos.map((photo) => photo.id ?? newIds.get(photo.url))
+
+  if (wantedOrder.length > 0 && wantedOrder.join() !== savedOrder.join()) {
+    const { error } = await supabase.rpc('reorder_species_photos', {
+      p_species_id: speciesId,
+      p_photo_ids: wantedOrder,
+    })
+    if (error) return finish(speciesPhotosErrorMessage(error))
+  }
+
+  return finish(null)
 }
 
 // How many species are in the database, without loading them
@@ -169,8 +277,8 @@ function speciesPhotoError(file) {
   return null
 }
 
-// Uploads a reference photo under a new random name and resolves to its public URL, ready to save
-// as reference_photo_url
+// Uploads a species photo under a new random name and resolves to its public URL, ready to save
+// in species_photos
 async function uploadSpeciesPhoto(file) {
   const invalid = speciesPhotoError(file)
   if (invalid) return { data: null, error: invalid }
@@ -259,6 +367,23 @@ function speciesErrorMessage(error) {
     // Plant records still point at the species being deleted
     case '23503':
       return HAS_RECORDS_MESSAGE
+    default:
+      return queryErrorMessage(error)
+  }
+}
+
+function speciesPhotosErrorMessage(error) {
+  switch (error.code) {
+    case '42501':
+      return 'Your account is not allowed to change species photos.'
+    // Two photos at one position, or reorder_species_photos was given a different set of photos:
+    // someone else changed this species' photos at the same time
+    case '23505':
+    case '22023':
+      return 'The photos were changed somewhere else while you were editing. Open the species again and redo your changes.'
+    // More than 5 photos (limit_photos_per_record, 017); its message is written for people
+    case '23514':
+      return error.message
     default:
       return queryErrorMessage(error)
   }

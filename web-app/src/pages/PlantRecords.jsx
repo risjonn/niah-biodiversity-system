@@ -25,6 +25,7 @@ import LocalFloristOutlinedIcon from '@mui/icons-material/LocalFloristOutlined'
 import PrintOutlinedIcon from '@mui/icons-material/PrintOutlined'
 import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
+import { MorePhotosBadge } from '../components/PlantPhoto'
 import PlantRecordPanel from '../components/PlantRecordPanel'
 import TableSkeleton from '../components/TableSkeleton'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
@@ -53,7 +54,7 @@ const COLUMNS = [
 // Every plant record, read-only, with filters and server-side paging. Officers and admins only
 // (the whole web app is). Reviewing happens on Plant review; a pending record's panel links there.
 export default function PlantRecords() {
-  const { fetchPlantRecords, getPlantPhotoUrls } = usePlants()
+  const { fetchPlantRecords, getPlantPhotoUrls, countPlantPhotos } = usePlants()
   const { fetchSpecies } = useSpecies()
   // The status filter lives in the URL (/records?status=approved), so a link can open the page
   // already filtered and Back steps through the chips. Anything but a known status means All.
@@ -72,8 +73,9 @@ export default function PlantRecords() {
   // earlier request can't overwrite a newer one (the same approach as the species list)
   const loadKey = `${status}|${speciesId}|${debouncedSearch}|${page}`
   const [result, setResult] = useState(null)
-  // Signed photo URLs for the current page, by storage path
-  const [photoUrls, setPhotoUrls] = useState({ key: null, urls: {} })
+  // Signed cover URLs for the current page, by storage path, and how many photos each record has,
+  // by plant id (for the "+3" badge)
+  const [photoUrls, setPhotoUrls] = useState({ key: null, urls: {}, counts: {} })
   // Selected records for printing labels, by id, kept across pages and filters
   const [selected, setSelected] = useState(() => new Map())
   const [openRecord, setOpenRecord] = useState(null)
@@ -100,20 +102,35 @@ export default function PlantRecords() {
     }).then(async (nextResult) => {
       if (cancelled) return
       setResult({ ...nextResult, loadKey })
-      // One request signs every photo on this page
-      const paths = nextResult.data.rows.map((row) => row.photo_url)
-      const photos = await getPlantPhotoUrls(paths)
-      if (!cancelled) setPhotoUrls({ key: loadKey, urls: photos.data })
+      // One request signs every cover on this page and one counts every record's photos. Only
+      // the covers are signed; the panel loads a record's other photos when it is opened. A failed
+      // count only leaves the badges off.
+      const rows = nextResult.data.rows
+      const [photos, counts] = await Promise.all([
+        getPlantPhotoUrls(rows.map((row) => row.photo_url)),
+        countPlantPhotos(rows.map((row) => row.id)),
+      ])
+      if (!cancelled) setPhotoUrls({ key: loadKey, urls: photos.data, counts: counts.data })
     })
     return () => {
       cancelled = true
     }
-  }, [fetchPlantRecords, getPlantPhotoUrls, status, speciesId, debouncedSearch, page, loadKey])
+  }, [
+    fetchPlantRecords,
+    getPlantPhotoUrls,
+    countPlantPhotos,
+    status,
+    speciesId,
+    debouncedSearch,
+    page,
+    loadKey,
+  ])
 
   const isLoading = result?.loadKey !== loadKey
   const rows = isLoading ? [] : result.data.rows
   const total = isLoading ? null : result.data.total
   const urls = photoUrls.key === loadKey ? photoUrls.urls : null
+  const photoCounts = photoUrls.key === loadKey ? photoUrls.counts : {}
   const hasFilters = Boolean(status || speciesId || search.trim())
 
   function setPage(nextPage) {
@@ -289,6 +306,7 @@ export default function PlantRecords() {
                     key={row.id}
                     row={row}
                     photoUrl={urls ? (urls[row.photo_url] ?? null) : undefined}
+                    photoCount={photoCounts[row.id] ?? 0}
                     selected={selected.has(row.id)}
                     onToggle={() => toggleSelected(row)}
                     onOpen={() => setOpenRecord(row)}
@@ -332,7 +350,7 @@ function StatusChip({ label, selected, onClick }) {
 
 // Clicking the row opens the record's panel; the QR code is also a button, for the keyboard.
 // The checkbox only selects.
-function RecordRow({ row, photoUrl, selected, onToggle, onOpen }) {
+function RecordRow({ row, photoUrl, photoCount, selected, onToggle, onOpen }) {
   const status = row.review_status
   return (
     <TableRow hover selected={selected} onClick={onOpen} sx={{ cursor: 'pointer' }}>
@@ -344,7 +362,7 @@ function RecordRow({ row, photoUrl, selected, onToggle, onOpen }) {
         />
       </TableCell>
       <TableCell sx={{ py: 1 }}>
-        <Thumbnail hasPhoto={Boolean(row.photo_url)} url={photoUrl} />
+        <Thumbnail hasPhoto={Boolean(row.photo_url)} url={photoUrl} photoCount={photoCount} />
       </TableCell>
       <TableCell sx={{ whiteSpace: 'nowrap' }}>
         <Link
@@ -396,10 +414,11 @@ function RecordRow({ row, photoUrl, selected, onToggle, onOpen }) {
 }
 
 // url: a signed URL, null when it couldn't be signed, or undefined while the page's URLs load.
-// Decorative (the QR code is in the next cell), so alt is empty.
-function Thumbnail({ hasPhoto, url }) {
+// Decorative (the QR code is in the next cell), so alt is empty. photoCount adds the "+3" badge.
+function Thumbnail({ hasPhoto, url, photoCount }) {
   const [failed, setFailed] = useState(false)
   const frameSx = {
+    position: 'relative',
     width: THUMBNAIL_SIZE,
     height: THUMBNAIL_SIZE,
     borderRadius: 1,
@@ -418,6 +437,7 @@ function Thumbnail({ hasPhoto, url }) {
     return (
       <Box sx={frameSx}>
         <LocalFloristOutlinedIcon fontSize="small" aria-hidden="true" />
+        <MorePhotosBadge count={photoCount} sx={{ right: 2, bottom: 2 }} />
       </Box>
     )
   }
@@ -431,6 +451,7 @@ function Thumbnail({ hasPhoto, url }) {
         onError={() => setFailed(true)}
         sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
       />
+      <MorePhotosBadge count={photoCount} sx={{ right: 2, bottom: 2 }} />
     </Box>
   )
 }

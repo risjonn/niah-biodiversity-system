@@ -17,7 +17,7 @@ import {
 import CloseIcon from '@mui/icons-material/Close'
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined'
 import PrintOutlinedIcon from '@mui/icons-material/PrintOutlined'
-import PlantPhoto from './PlantPhoto'
+import PlantPhotos from './PlantPhoto'
 import QrCode from './QrCode'
 import { useToast } from '../context/ToastContext'
 import { usePlants } from '../hooks/usePlants'
@@ -29,8 +29,9 @@ import { formatCoordinates, formatHeight } from '../lib/plantFormat'
 import { downloadQrPng } from '../lib/qrCode'
 import { reviewStatusChipColors, reviewStatusLabels } from '../lib/reviewStatus'
 
-// One plant record in a right-side drawer, read-only: photo, details, review status, and its QR
-// code with Download PNG and Print label. Shared by the plant records page and species pages.
+// One plant record in a right-side drawer, read-only: photos, details, review status, and its QR
+// code with Download PNG and Print label. Shared by the plant records page, species pages and the
+// dashboard's recent activity.
 // - plantId: the record to show, or null when closed
 // - plant: the full record if the caller already has it; otherwise it is loaded by id
 export default function PlantRecordPanel({ plantId, plant, onClose }) {
@@ -109,7 +110,7 @@ function RecordDetails({ plant, onClose }) {
   return (
     <Stack spacing={3}>
       <ReviewStatus plant={plant} onClose={onClose} />
-      <PlantPhoto path={plant.photo_url} alt={`Photo of ${plant.qr_code}`} maxHeight="40vh" />
+      <PlantPhotos plant={plant} maxHeight="40vh" />
 
       <Stack spacing={2}>
         <DetailField label="Species">
