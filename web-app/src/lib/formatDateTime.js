@@ -74,6 +74,13 @@ export function sarawakHourOf(value) {
   return partsOf(value)?.hour ?? null
 }
 
+// The month in Sarawak as 'YYYY-MM', e.g. for counting records per month, or null for no value
+export function sarawakMonthKeyOf(value) {
+  const parts = partsOf(value)
+  if (!parts) return null
+  return `${parts.year}-${String(MONTH_NAMES.indexOf(parts.month) + 1).padStart(2, '0')}`
+}
+
 // "2 pm", the hour on its own, or null for no value. For chart axes, where the minutes are
 // always :00.
 export function formatHour(value) {
