@@ -28,7 +28,7 @@ import GridViewOutlinedIcon from '@mui/icons-material/GridViewOutlined'
 import ViewListOutlinedIcon from '@mui/icons-material/ViewListOutlined'
 import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
-import { NoPhoto } from '../components/PlantPhoto'
+import { MorePhotosBadge, NoPhoto } from '../components/PlantPhoto'
 import RelativeTime from '../components/RelativeTime'
 import ReviewPanel from '../components/ReviewPanel'
 import TableSkeleton from '../components/TableSkeleton'
@@ -92,13 +92,16 @@ function applyFilters(plants, { speciesId, search, sort }) {
 }
 
 export default function PlantReview() {
-  const { fetchPendingPlants, getPlantPhotoUrls, reviewPlant } = usePlants()
+  const { fetchPendingPlants, getPlantPhotoUrls, countPlantPhotos, reviewPlant } = usePlants()
   const toast = useToast()
   const { refreshCounts } = useNavCounts()
   // { data, error, loadedAt }: the queue, and when it was loaded (the "now" for relative times)
   const [result, setResult] = useState(null)
-  // Signed URLs for the queue's photos, by storage path (one request for the whole queue)
+  // Signed URLs for the queue's cover photos, by storage path (one request for the whole queue)
   const [photoUrls, setPhotoUrls] = useState(null)
+  // How many photos each record has, by plant id, for the "+3" badge (one batched query). Only
+  // the covers are signed; the review panel loads the rest of a record's photos when opened.
+  const [photoCounts, setPhotoCounts] = useState({})
   const [view, setView] = useState(readView)
   const [speciesId, setSpeciesId] = useState('')
   const [search, setSearch] = useState('')
@@ -109,19 +112,24 @@ export default function PlantReview() {
   const [openId, setOpenId] = useState(null)
   const [busy, setBusy] = useState(false)
 
-  // Loads the queue and then signs its photos in one go. Resolves to the new queue. State is only
-  // set in the .then callbacks, never synchronously, so it can be called straight from an effect
-  // (the same approach as the sensors page).
+  // Loads the queue, then signs its cover photos and counts its photos, each in one go. Resolves
+  // to the new queue. State is only set in the .then callbacks, never synchronously, so it can be
+  // called straight from an effect (the same approach as the sensors page). A failed count only
+  // leaves the badges off.
   const loadQueue = useCallback(
     () =>
       fetchPendingPlants().then((nextResult) => {
         setResult({ ...nextResult, loadedAt: Date.now() })
-        return getPlantPhotoUrls(nextResult.data.map((plant) => plant.photo_url)).then((photos) => {
+        return Promise.all([
+          getPlantPhotoUrls(nextResult.data.map((plant) => plant.photo_url)),
+          countPlantPhotos(nextResult.data.map((plant) => plant.id)),
+        ]).then(([photos, counts]) => {
           setPhotoUrls((current) => ({ ...current, ...photos.data }))
+          setPhotoCounts((current) => ({ ...current, ...counts.data }))
           return nextResult
         })
       }),
-    [fetchPendingPlants, getPlantPhotoUrls],
+    [fetchPendingPlants, getPlantPhotoUrls, countPlantPhotos],
   )
 
   useEffect(() => {
@@ -309,6 +317,7 @@ export default function PlantReview() {
               <ReviewCard
                 plant={plant}
                 photoUrl={photoUrls ? (photoUrls[plant.photo_url] ?? null) : undefined}
+                photoCount={photoCounts[plant.id] ?? 0}
                 now={result.loadedAt}
                 onOpen={() => openPanel(plant)}
               />
@@ -361,7 +370,8 @@ export default function PlantReview() {
 
 // One pending record as a card. The whole card opens the review panel.
 // photoUrl: a signed URL, null when it couldn't be signed, or undefined while the URLs load.
-function ReviewCard({ plant, photoUrl, now, onOpen }) {
+// photoCount: how many photos the record has (0 while unknown), for the "+3" badge.
+function ReviewCard({ plant, photoUrl, photoCount, now, onOpen }) {
   const species = plant.species
 
   return (
@@ -373,8 +383,16 @@ function ReviewCard({ plant, photoUrl, now, onOpen }) {
         onClick={onOpen}
         sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}
       >
-        <Box sx={{ aspectRatio: '4 / 3', bgcolor: 'background.default', overflow: 'hidden' }}>
+        <Box
+          sx={{
+            position: 'relative',
+            aspectRatio: '4 / 3',
+            bgcolor: 'background.default',
+            overflow: 'hidden',
+          }}
+        >
           <CardPhoto plant={plant} url={photoUrl} />
+          <MorePhotosBadge count={photoCount} sx={{ right: 8, bottom: 8, px: 1, borderRadius: 1 }} />
         </Box>
         <CardContent sx={{ flexGrow: 1 }}>
           <Stack spacing={1}>

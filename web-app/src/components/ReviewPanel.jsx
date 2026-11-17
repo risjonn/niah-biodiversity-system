@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import {
   Box,
   Button,
-  ButtonBase,
   Chip,
   Dialog,
   DialogActions,
@@ -20,10 +19,8 @@ import {
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import CloseIcon from '@mui/icons-material/Close'
-import OpenInFullOutlinedIcon from '@mui/icons-material/OpenInFullOutlined'
 import EmptyState from './EmptyState'
-import PhotoViewer from './PhotoViewer'
-import PlantPhoto from './PlantPhoto'
+import PlantPhotos from './PlantPhoto'
 import RelativeTime from './RelativeTime'
 import { conservationStatusChipColor, conservationStatusLabels } from '../lib/conservationStatus'
 import { formatDateTime } from '../lib/formatDateTime'
@@ -40,7 +37,7 @@ import { formatCoordinates, formatHeight } from '../lib/plantFormat'
 //
 // Keyboard: A approve, R reject, left/right previous/next, Esc close (the drawer's own Esc).
 // Ignored while busy, while typing in a field, and while the reject confirm or full-screen photo
-// is open.
+// is open (in the full-screen photo, left/right move between the record's photos instead).
 export default function ReviewPanel({
   open,
   plant,
@@ -128,7 +125,7 @@ export default function ReviewPanel({
         {plant ? (
           <>
             <Box sx={{ flexGrow: 1, overflowY: 'auto', px: { xs: 2, sm: 3 }, py: 2 }}>
-              <RecordDetails plant={plant} now={now} onViewPhoto={() => setViewerOpen(true)} />
+              <RecordDetails plant={plant} now={now} onViewerOpenChange={setViewerOpen} />
             </Box>
             <Divider />
             <ReviewActions busy={busy} onApprove={onApprove} onReject={() => setRejectOpen(true)} onSkip={onSkip} />
@@ -158,49 +155,22 @@ export default function ReviewPanel({
           onClose={() => setRejectOpen(false)}
         />
       ) : null}
-      {plant?.photo_url ? (
-        <PhotoViewer open={viewerOpen} onClose={() => setViewerOpen(false)}>
-          <PlantPhoto path={plant.photo_url} alt={`Photo of ${plant.qr_code}`} maxHeight="88vh" />
-        </PhotoViewer>
-      ) : null}
     </Drawer>
   )
 }
 
-function RecordDetails({ plant, now, onViewPhoto }) {
+function RecordDetails({ plant, now, onViewerOpenChange }) {
   const species = plant.species
-  const photo = <PlantPhoto path={plant.photo_url} alt={`Photo of ${plant.qr_code}`} maxHeight="45vh" />
 
   return (
     <Stack spacing={3}>
-      {plant.photo_url ? (
-        // The whole photo is a button that opens it full screen
-        <ButtonBase
-          onClick={onViewPhoto}
-          aria-label="View photo full screen"
-          sx={{ display: 'block', width: '100%', borderRadius: 1, position: 'relative' }}
-        >
-          {photo}
-          <Box
-            aria-hidden="true"
-            sx={{
-              position: 'absolute',
-              right: 8,
-              bottom: 8,
-              display: 'flex',
-              p: 0.5,
-              borderRadius: 1,
-              bgcolor: 'background.paper',
-              color: 'text.primary',
-              boxShadow: 1,
-            }}
-          >
-            <OpenInFullOutlinedIcon fontSize="small" />
-          </Box>
-        </ButtonBase>
-      ) : (
-        photo
-      )}
+      {/* Keyed by record, so each one starts at its cover */}
+      <PlantPhotos
+        key={plant.id}
+        plant={plant}
+        maxHeight="45vh"
+        onViewerOpenChange={onViewerOpenChange}
+      />
 
       <Box
         sx={{

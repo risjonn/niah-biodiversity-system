@@ -108,8 +108,9 @@ export function usePlants() {
     countApprovedPlants,
     getPlantById,
     getPlantsBySpecies,
-    getPlantPhotoUrl,
+    getPlantPhotos,
     getPlantPhotoUrls,
+    countPlantPhotos,
     reviewPlant,
   }
 }
@@ -173,18 +174,58 @@ async function getPlantPhotoUrls(paths) {
   return { data: urls, error: null }
 }
 
-// Plant photos are in a private bucket (database/schema/006_plant_photos_storage.sql) and
-// photo_url holds the file's storage path, so showing one needs a short-lived signed URL.
-// Resolves to { data: signedUrl, error }; storage only signs it for the photo's owner and for
-// conservation officers and admins.
-async function getPlantPhotoUrl(path) {
-  const { data, error } = await supabase.storage
-    .from(PHOTO_BUCKET)
-    .createSignedUrl(path, PHOTO_URL_LIFETIME_SECONDS)
+// Every photo of one plant record, cover first (plant_photos, database/schema/017), each with a
+// signed URL. The files are in a private bucket, so all of them are signed in one request.
+// `fallbackPath` is the record's photo_url, used when it has no plant_photos rows (017 copies
+// photo_url into plant_photos, so this only matters for a row added some other way).
+// Resolves to { data: [{ id, path, url }], error }; url is null for a photo storage couldn't sign.
+// Read-only: on the web, nobody adds or removes plant photos.
+async function getPlantPhotos(plantId, fallbackPath = null) {
+  const { data: rows, error } = await supabase
+    .from('plant_photos')
+    .select('id, storage_path, position')
+    .eq('plant_id', plantId)
+    .order('position')
 
-  if (error) return { data: null, error: photoErrorMessage(error) }
-  return { data: data.signedUrl, error: null }
+  if (error) return { data: [], error: plantErrorMessage(error) }
+
+  const photos =
+    rows.length > 0
+      ? rows.map((row) => ({ id: row.id, path: row.storage_path }))
+      : fallbackPath
+        ? [{ id: null, path: fallbackPath }]
+        : []
+  if (photos.length === 0) return { data: [], error: null }
+
+  const signed = await getPlantPhotoUrls(photos.map((photo) => photo.path))
+  // Nothing could be signed: say why, rather than showing every photo as broken
+  if (signed.error) return { data: [], error: signed.error }
+  return {
+    data: photos.map((photo) => ({ ...photo, url: signed.data[photo.path] ?? null })),
+    error: null,
+  }
 }
+
+// How many photos each of these plant records has, for the "+3" badge on list thumbnails.
+// Resolves to { data: { [plantId]: count }, error }, with records that have none left out.
+// One request per 100 records (at most 500 rows, under the API's 1000-row limit) instead of one
+// per record; the ids go in the URL, which keeps it well under the server's length limit.
+async function countPlantPhotos(plantIds) {
+  const ids = [...new Set(plantIds.filter(Boolean))]
+  const counts = {}
+  for (let start = 0; start < ids.length; start += COUNT_BATCH_SIZE) {
+    const { data, error } = await supabase
+      .from('plant_photos')
+      .select('plant_id')
+      .in('plant_id', ids.slice(start, start + COUNT_BATCH_SIZE))
+
+    if (error) return { data: counts, error: plantErrorMessage(error) }
+    for (const row of data) counts[row.plant_id] = (counts[row.plant_id] ?? 0) + 1
+  }
+  return { data: counts, error: null }
+}
+
+const COUNT_BATCH_SIZE = 100
 
 function countApprovedPlants() {
   return countResult(

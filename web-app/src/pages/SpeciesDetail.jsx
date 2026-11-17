@@ -4,7 +4,6 @@ import {
   Alert,
   Box,
   Button,
-  ButtonBase,
   Chip,
   CircularProgress,
   Dialog,
@@ -15,7 +14,6 @@ import {
   Grid,
   Link,
   Paper,
-  Skeleton,
   Stack,
   Table,
   TableBody,
@@ -29,12 +27,11 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlined'
 import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined'
 import HighlightOffOutlinedIcon from '@mui/icons-material/HighlightOffOutlined'
-import OpenInFullOutlinedIcon from '@mui/icons-material/OpenInFullOutlined'
 import ChartCard from '../components/ChartCard'
 import EmptyState from '../components/EmptyState'
 import LeafPlaceholder from '../components/LeafPlaceholder'
 import PageHeader from '../components/PageHeader'
-import PhotoViewer from '../components/PhotoViewer'
+import PhotoGallery from '../components/PhotoGallery'
 import PlantRecordPanel from '../components/PlantRecordPanel'
 import RecordsByMonthBars from '../components/RecordsByMonthBars'
 import StatCard from '../components/StatCard'
@@ -61,7 +58,7 @@ const STATUS_ICONS = {
 // Editing happens on SpeciesForm (/species/:id/edit); deleting is confirmed in a dialog here
 export default function SpeciesDetail() {
   const { id } = useParams()
-  const { getSpeciesById } = useSpecies()
+  const { getSpeciesById, getSpeciesPhotos } = useSpecies()
   const { getPlantsBySpecies } = usePlants()
   // Bumped by Retry so the same id loads again
   const [attempt, setAttempt] = useState(0)
@@ -76,11 +73,14 @@ export default function SpeciesDetail() {
 
     async function load() {
       const speciesResult = await getSpeciesById(id)
-      // Records are only looked up for a species that exists, which also keeps a malformed id
-      // from reaching the plants query
-      const plantsResult = speciesResult.data
-        ? await getPlantsBySpecies(id)
-        : { data: [], error: null }
+      // Records and photos are only looked up for a species that exists, which also keeps a
+      // malformed id from reaching those queries
+      const [plantsResult, photosResult] = speciesResult.data
+        ? await Promise.all([getPlantsBySpecies(id), getSpeciesPhotos(id)])
+        : [
+            { data: [], error: null },
+            { data: [], error: null },
+          ]
       if (!cancelled) {
         setResult({
           loadKey,
@@ -88,6 +88,7 @@ export default function SpeciesDetail() {
           speciesError: speciesResult.error,
           plants: plantsResult.data,
           plantsError: plantsResult.error,
+          photos: speciesPhotosOrCover(speciesResult.data, photosResult.data),
         })
       }
     }
@@ -96,7 +97,7 @@ export default function SpeciesDetail() {
     return () => {
       cancelled = true
     }
-  }, [getSpeciesById, getPlantsBySpecies, id, loadKey])
+  }, [getSpeciesById, getPlantsBySpecies, getSpeciesPhotos, id, loadKey])
 
   const isLoading = result?.loadKey !== loadKey
   const retry = () => setAttempt((current) => current + 1)
@@ -138,6 +139,7 @@ export default function SpeciesDetail() {
       {!isLoading && result.species ? (
         <SpeciesContent
           species={result.species}
+          photos={result.photos}
           plants={result.plants}
           plantsError={result.plantsError}
           onRetry={retry}
@@ -147,22 +149,25 @@ export default function SpeciesDetail() {
   )
 }
 
-function SpeciesContent({ species, plants, plantsError, onRetry }) {
+// The species' photos for the gallery. If species_photos couldn't be read (or has no rows while
+// the species still has a cover, which 017's triggers shouldn't allow), the cover alone is shown,
+// as before multiple photos.
+function speciesPhotosOrCover(species, photos) {
+  if (!species) return []
+  if (photos.length > 0) return photos
+  return species.reference_photo_url ? [{ id: null, url: species.reference_photo_url }] : []
+}
+
+function SpeciesContent({ species, photos, plants, plantsError, onRetry }) {
   const status = species.conservation_status
   const statusLabel = conservationStatusLabels[status] ?? status
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
 
   return (
     <>
-      {/* The photo beside the name, family and status; stacked on narrow screens */}
+      {/* The photos beside the name, family and status; stacked on narrow screens */}
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} sx={{ alignItems: { md: 'flex-start' } }}>
-        {/* Keyed by the URL so a changed photo starts loading again */}
-        <ReferencePhoto
-          key={species.reference_photo_url ?? ''}
-          url={species.reference_photo_url}
-          alt={`Reference photo of ${species.scientific_name}`}
-          conservationStatus={status}
-        />
+        <SpeciesPhotos species={species} photos={photos} />
         <Stack spacing={2} sx={{ flexGrow: 1, minWidth: 0 }}>
           <PageHeader
             title={
@@ -204,6 +209,7 @@ function SpeciesContent({ species, plants, plantsError, onRetry }) {
       <DeleteSpeciesDialog
         open={isDeleteOpen}
         species={species}
+        photos={photos}
         // If the records failed to load this is 0, and a refused delete is caught by its error
         recordCount={plants.length}
         onClose={() => setIsDeleteOpen(false)}
@@ -214,7 +220,7 @@ function SpeciesContent({ species, plants, plantsError, onRetry }) {
 
 // A species with plant records can't be deleted (they reference it), so the dialog only offers
 // deleting when there are none
-function DeleteSpeciesDialog({ open, species, recordCount, onClose }) {
+function DeleteSpeciesDialog({ open, species, photos, recordCount, onClose }) {
   const navigate = useNavigate()
   const toast = useToast()
   const { deleteSpecies, removeSpeciesPhoto } = useSpecies()
@@ -237,8 +243,9 @@ function DeleteSpeciesDialog({ open, species, recordCount, onClose }) {
       setIsDeleting(false)
       return
     }
-    // Not awaited: removeSpeciesPhoto never fails and leaving the page doesn't stop it
-    removeSpeciesPhoto(species.reference_photo_url)
+    // The photo rows went with the species (on delete cascade); their files are removed here.
+    // Not awaited: removeSpeciesPhoto never fails and leaving the page doesn't stop it.
+    for (const photo of photos) removeSpeciesPhoto(photo.url)
     // Shown on the species list, which the app-wide toast outlives the navigation to
     toast.success(`Deleted ${species.scientific_name}`)
     // Replaced so Back doesn't return to the deleted species
@@ -259,7 +266,7 @@ function DeleteSpeciesDialog({ open, species, recordCount, onClose }) {
           <DialogContentText>
             {hasRecords
               ? `This species has ${recordCount} plant ${recordCount === 1 ? 'record' : 'records'} and cannot be deleted.`
-              : "This permanently removes the species and its reference photo. It can't be undone."}
+              : `This permanently removes the species${photos.length === 0 ? '' : photos.length === 1 ? ' and its photo' : ' and its photos'}. It can't be undone.`}
           </DialogContentText>
           {error ? <Alert severity="error">{error}</Alert> : null}
         </Stack>
@@ -304,101 +311,57 @@ function TextSection({ title, text }) {
   )
 }
 
-// reference_photo_url is a plain image URL for now, not a storage path. Once loaded, the photo
-// is a button that opens it full screen in the same viewer as Plant review. Without a photo (or
-// if it won't load) it is the gallery's leaf placeholder with a short note.
-function ReferencePhoto({ url, alt, conservationStatus }) {
-  const [status, setStatus] = useState(url ? 'loading' : 'none')
-  const [viewerOpen, setViewerOpen] = useState(false)
+// The species' photos (public URLs, nothing to sign) as a gallery: the cover in a 4:3 frame,
+// thumbnails under it when there are more, full screen on click. Without a photo (or if one
+// won't load) it is the species list's leaf placeholder with a short note.
+function SpeciesPhotos({ species, photos }) {
+  const name = species.scientific_name
+  const total = photos.length
 
   return (
-    <Box
-      sx={{
-        position: 'relative',
-        flexShrink: 0,
-        width: { xs: '100%', md: 400, lg: 480 },
-        aspectRatio: '4 / 3',
-        overflow: 'hidden',
-        borderRadius: 1,
-        border: 1,
-        borderColor: 'divider',
-        bgcolor: 'background.default',
-      }}
-    >
-      {status === 'loading' ? (
-        <Skeleton
-          variant="rectangular"
-          aria-label="Loading photo"
-          sx={{ position: 'absolute', inset: 0, height: '100%' }}
-        />
-      ) : null}
-      {status === 'none' || status === 'error' ? (
-        <>
-          <LeafPlaceholder conservationStatus={conservationStatus} />
-          {/* Primary text: the secondary grey falls below AA (4.5:1) on the darker tints */}
-          <Typography
-            variant="caption"
-            color="textPrimary"
-            sx={{ position: 'absolute', left: 0, right: 0, bottom: 12, textAlign: 'center' }}
-          >
-            {status === 'none' ? 'No reference photo yet' : 'This photo could not be loaded.'}
-          </Typography>
-        </>
-      ) : null}
-      {url ? (
-        <Box
-          component="img"
-          src={url}
-          alt={alt}
-          onLoad={() => setStatus('loaded')}
-          onError={() => setStatus('error')}
-          sx={{
-            display: status === 'loaded' ? 'block' : 'none',
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-          }}
-        />
-      ) : null}
-      {status === 'loaded' ? (
-        <ButtonBase
-          onClick={() => setViewerOpen(true)}
-          aria-label="View photo full screen"
-          sx={{
-            position: 'absolute',
-            inset: 0,
-            // Drawn inside the frame, which clips anything outside it
-            '&.Mui-focusVisible': { outline: 3, outlineColor: 'primary.main', outlineOffset: -3 },
-          }}
-        >
-          <Box
-            aria-hidden="true"
-            sx={{
-              position: 'absolute',
-              right: 8,
-              bottom: 8,
-              display: 'flex',
-              p: 0.5,
-              borderRadius: 1,
-              bgcolor: 'background.paper',
-              color: 'text.primary',
-              boxShadow: 1,
-            }}
-          >
-            <OpenInFullOutlinedIcon fontSize="small" />
-          </Box>
-        </ButtonBase>
-      ) : null}
-      {url ? (
-        <PhotoViewer open={viewerOpen} onClose={() => setViewerOpen(false)}>
-          <Box
-            component="img"
-            src={url}
-            alt={alt}
-            sx={{ display: 'block', mx: 'auto', maxWidth: '100%', maxHeight: '88vh', objectFit: 'contain' }}
-          />
-        </PhotoViewer>
-      ) : null}
+    <PhotoGallery
+      fit="cover"
+      photos={photos.map((photo, index) => ({
+        key: photo.id ?? photo.url,
+        url: photo.url,
+        alt: total > 1 ? `Photo ${index + 1} of ${total} of ${name}` : `Reference photo of ${name}`,
+      }))}
+      empty={
+        <Box sx={{ position: 'relative', aspectRatio: '4 / 3', ...placeholderFrameSx }}>
+          <LeafNote conservationStatus={species.conservation_status}>No reference photo yet</LeafNote>
+        </Box>
+      }
+      broken={
+        <LeafNote conservationStatus={species.conservation_status}>
+          This photo could not be loaded.
+        </LeafNote>
+      }
+      sx={{ flexShrink: 0, width: { xs: '100%', md: 400, lg: 480 } }}
+    />
+  )
+}
+
+const placeholderFrameSx = {
+  overflow: 'hidden',
+  borderRadius: 1,
+  border: 1,
+  borderColor: 'divider',
+  bgcolor: 'background.default',
+}
+
+// The leaf placeholder filling its frame, with a note along the bottom
+function LeafNote({ conservationStatus, children }) {
+  return (
+    <Box sx={{ position: 'absolute', inset: 0 }}>
+      <LeafPlaceholder conservationStatus={conservationStatus} />
+      {/* Primary text: the secondary grey falls below AA (4.5:1) on the darker tints */}
+      <Typography
+        variant="caption"
+        color="textPrimary"
+        sx={{ position: 'absolute', left: 0, right: 0, bottom: 12, textAlign: 'center' }}
+      >
+        {children}
+      </Typography>
     </Box>
   )
 }

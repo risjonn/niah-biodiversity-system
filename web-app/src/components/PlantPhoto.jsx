@@ -1,15 +1,39 @@
-import { useEffect, useState } from 'react'
-import { Alert, Box, CircularProgress, Stack, Typography } from '@mui/material'
+import { Alert, Box, Stack, Typography } from '@mui/material'
 import ImageNotSupportedOutlinedIcon from '@mui/icons-material/ImageNotSupportedOutlined'
-import { usePlants } from '../hooks/usePlants'
+import PhotoGallery from './PhotoGallery'
+import { usePlantPhotos } from '../hooks/usePlantPhotos'
 
-// A plant record's photo, shared by the review dialog and the record panel. `path` is the record's
-// photo_url, or null when it has none. `maxHeight` caps the photo (any sx value), so a tall photo
-// doesn't push the rest of its dialog or panel out of view.
-export default function PlantPhoto({ path, alt, maxHeight = { xs: '40vh', md: '60vh' } }) {
-  if (!path) return <NoPhoto />
-  // Keyed by path, so another record's photo starts from a fresh load
-  return <SignedPhoto key={path} path={path} alt={alt} maxHeight={maxHeight} />
+// A plant record's photos as a gallery, cover first, shared by the review panel and the record
+// panel. Read-only: nobody adds or removes plant photos on the web. `maxHeight` caps the large
+// photo (any sx value), so a tall photo doesn't push the rest of its panel out of view.
+// onViewerOpenChange: see PhotoGallery.
+export default function PlantPhotos({ plant, maxHeight, onViewerOpenChange }) {
+  const { photos, error, loading } = usePlantPhotos(plant)
+
+  if (error) return <Alert severity="error">{error}</Alert>
+
+  const total = photos.length
+  return (
+    <PhotoGallery
+      photos={photos.map((photo, index) => ({
+        key: photo.id ?? photo.path,
+        url: photo.url,
+        alt:
+          total > 1
+            ? `Photo ${index + 1} of ${total} of ${plant.qr_code}`
+            : `Photo of ${plant.qr_code}`,
+      }))}
+      loading={loading}
+      empty={<NoPhoto />}
+      broken={
+        <Message icon={<ImageNotSupportedOutlinedIcon aria-hidden="true" />}>
+          This photo could not be displayed. Try again later.
+        </Message>
+      }
+      maxHeight={maxHeight}
+      onViewerOpenChange={onViewerOpenChange}
+    />
+  )
 }
 
 // The placeholder for a record without a photo. `fill` stretches it to its container's height
@@ -17,15 +41,55 @@ export default function PlantPhoto({ path, alt, maxHeight = { xs: '40vh', md: '6
 export function NoPhoto({ fill = false }) {
   return (
     <PhotoFrame fill={fill}>
-      <Stack spacing={1} sx={{ alignItems: 'center', color: 'text.secondary', py: 4 }}>
-        <ImageNotSupportedOutlinedIcon aria-hidden="true" />
-        <Typography variant="body2">No photo with this record</Typography>
-      </Stack>
+      <Message icon={<ImageNotSupportedOutlinedIcon aria-hidden="true" />}>
+        No photo with this record
+      </Message>
     </PhotoFrame>
   )
 }
 
-// The grey box the photo (or its loading, error or missing state) sits in
+// "+3" on a list's cover thumbnail when a record has more photos than the cover. Place it inside
+// a box with position: relative; `sx` sets where. Nothing for one photo or none. Read as
+// "4 photos", since "+3" on its own means little to a screen reader.
+export function MorePhotosBadge({ count, sx }) {
+  if (!count || count < 2) return null
+  return (
+    <Box
+      role="img"
+      aria-label={`${count} photos`}
+      sx={{
+        position: 'absolute',
+        right: 4,
+        bottom: 4,
+        px: 0.5,
+        borderRadius: 0.5,
+        bgcolor: 'background.paper',
+        color: 'text.primary',
+        typography: 'caption',
+        fontWeight: 500,
+        lineHeight: 1.5,
+        boxShadow: 1,
+        pointerEvents: 'none',
+        ...sx,
+      }}
+    >
+      +{count - 1}
+    </Box>
+  )
+}
+
+function Message({ icon, children }) {
+  return (
+    <Stack spacing={1} sx={{ alignItems: 'center', color: 'text.secondary', py: 4, px: 2 }}>
+      {icon}
+      <Typography variant="body2" sx={{ textAlign: 'center' }}>
+        {children}
+      </Typography>
+    </Stack>
+  )
+}
+
+// The grey box the placeholder sits in, the same as PhotoGallery's frame
 function PhotoFrame({ children, fill = false }) {
   return (
     <Box
@@ -41,56 +105,5 @@ function PhotoFrame({ children, fill = false }) {
     >
       {children}
     </Box>
-  )
-}
-
-// photo_url is a path in the private plant-photos bucket, so the image is shown through a signed
-// URL. Loading lasts until both the URL and the image itself have arrived. The whole photo is
-// always shown (contained, not cropped).
-function SignedPhoto({ path, alt, maxHeight }) {
-  const { getPlantPhotoUrl } = usePlants()
-  const [result, setResult] = useState(null)
-  const [imageState, setImageState] = useState(null)
-
-  useEffect(() => {
-    let cancelled = false
-    getPlantPhotoUrl(path).then((nextResult) => {
-      if (!cancelled) setResult(nextResult)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [getPlantPhotoUrl, path])
-
-  const url = result?.data ?? null
-
-  if (result?.error) return <Alert severity="error">{result.error}</Alert>
-  if (imageState === 'error') {
-    return <Alert severity="error">This photo could not be displayed. Try again later.</Alert>
-  }
-
-  return (
-    <PhotoFrame>
-      {imageState !== 'loaded' ? (
-        <Stack sx={{ alignItems: 'center', py: 4 }}>
-          <CircularProgress aria-label="Loading photo" />
-        </Stack>
-      ) : null}
-      {url ? (
-        <Box
-          component="img"
-          src={url}
-          alt={alt}
-          onLoad={() => setImageState('loaded')}
-          onError={() => setImageState('error')}
-          sx={{
-            display: imageState === 'loaded' ? 'block' : 'none',
-            maxWidth: '100%',
-            maxHeight,
-            objectFit: 'contain',
-          }}
-        />
-      ) : null}
-    </PhotoFrame>
   )
 }
