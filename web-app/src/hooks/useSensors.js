@@ -9,6 +9,10 @@ import { countResult, queryErrorMessage } from '../lib/queryHelpers'
 const ALERT_WITH_NODE =
   '*, sensor_nodes(node_identifier), acknowledged_by_profile:profiles(full_name)'
 
+// The same, plus the reading that raised the alert (alerts.sensor_reading_id, 009) as `reading`,
+// null for alerts without one. Read by alertReadingText in lib/alerts.js.
+const ALERT_WITH_READING = `${ALERT_WITH_NODE}, reading:sensor_readings(temperature, humidity, motion_duration_seconds)`
+
 // The acknowledged list is history, so only the most recent ones are loaded
 const ACKNOWLEDGED_ALERTS_LIMIT = 50
 
@@ -86,7 +90,7 @@ async function getNodeStatus() {
 async function getRecentAlerts(limit = 6) {
   const { data, error } = await supabase
     .from('alerts')
-    .select(`${ALERT_WITH_NODE}, reading:sensor_readings(temperature, humidity, motion_duration_seconds)`)
+    .select(ALERT_WITH_READING)
     .order('created_at', { ascending: false })
     .limit(limit)
 
@@ -94,9 +98,10 @@ async function getRecentAlerts(limit = 6) {
   return { data, error: null }
 }
 
-// Open alerts newest first, or with `acknowledged: true` the most recently acknowledged ones
+// Open alerts newest first, or with `acknowledged: true` the most recently acknowledged ones.
+// Each comes with its node and the reading that raised it, as in getRecentAlerts.
 async function getAlerts({ acknowledged = false } = {}) {
-  let query = supabase.from('alerts').select(ALERT_WITH_NODE).eq('is_acknowledged', acknowledged)
+  let query = supabase.from('alerts').select(ALERT_WITH_READING).eq('is_acknowledged', acknowledged)
 
   query = acknowledged
     ? query.order('acknowledged_at', { ascending: false }).limit(ACKNOWLEDGED_ALERTS_LIMIT)

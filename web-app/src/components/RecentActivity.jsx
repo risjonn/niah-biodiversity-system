@@ -17,34 +17,25 @@ import {
   Typography,
 } from '@mui/material'
 import { alpha } from '@mui/material/styles'
-import DirectionsRunOutlinedIcon from '@mui/icons-material/DirectionsRunOutlined'
 import LocalFloristOutlinedIcon from '@mui/icons-material/LocalFloristOutlined'
-import SensorsOutlinedIcon from '@mui/icons-material/SensorsOutlined'
-import ThermostatOutlinedIcon from '@mui/icons-material/ThermostatOutlined'
-import WaterDropOutlinedIcon from '@mui/icons-material/WaterDropOutlined'
-import WifiOffOutlinedIcon from '@mui/icons-material/WifiOffOutlined'
 import EmptyState from './EmptyState'
 import PlantRecordPanel from './PlantRecordPanel'
 import RelativeTime from './RelativeTime'
 import { usePlants } from '../hooks/usePlants'
 import { useSensors } from '../hooks/useSensors'
-import { alertReadingText, alertTypeLabels } from '../lib/alerts'
+import {
+  alertReadingText,
+  alertTypeIcons,
+  alertTypeLabels,
+  DefaultAlertIcon,
+  severityColors,
+} from '../lib/alerts'
 import { reviewStatusChipColors, reviewStatusLabels } from '../lib/reviewStatus'
 import { visuallyHidden } from '../lib/visuallyHidden'
 
 const SHOWN = 6
 // Photo and icon size in the lists, in px (48 on the spacing scale)
 const THUMB_SIZE = 48
-
-const alertIcons = {
-  temperature_anomaly: ThermostatOutlinedIcon,
-  humidity_anomaly: WaterDropOutlinedIcon,
-  motion_detected: DirectionsRunOutlinedIcon,
-  node_offline: WifiOffOutlinedIcon,
-}
-
-// Palette colour of the icon tile, by severity (as the severity chips on the sensors page)
-const severityColors = { high: 'error', medium: 'warning', low: 'primary' }
 
 // The dashboard's recent activity: the latest plant records and the latest alerts, side by side
 // from md up and stacked below. Each card loads on its own.
@@ -208,7 +199,7 @@ function LatestAlerts() {
       {result && result.data.length > 0 ? (
         <List disablePadding>
           {result.data.map((alert) => {
-            const Icon = alertIcons[alert.alert_type] ?? SensorsOutlinedIcon
+            const Icon = alertTypeIcons[alert.alert_type] ?? DefaultAlertIcon
             const color = severityColors[alert.severity] ?? 'primary'
             const reading = alertReadingText(alert)
             return (

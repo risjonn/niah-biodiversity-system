@@ -30,6 +30,7 @@ import ContourPattern from './ContourPattern'
 import { useAuth } from '../context/AuthContext'
 import { useNavCounts } from '../context/NavCountsContext'
 import { roleLabels } from '../lib/roles'
+import { initialsOf } from '../lib/userDisplay'
 import { visuallyHidden } from '../lib/visuallyHidden'
 import { tokens } from '../theme/theme'
 
@@ -249,15 +250,6 @@ function SidebarButton({ collapsed, label, icon: Icon, onClick }) {
   ) : (
     button
   )
-}
-
-// "Siti Nurhaliza" -> "SN", "Daniel" -> "D". The role's first letter when there's no name.
-function initialsOf(name, role) {
-  const words = (name ?? '').trim().split(/\s+/).filter(Boolean)
-  if (words.length === 0) return (roleLabels[role] ?? '?').charAt(0)
-  const first = words[0].charAt(0)
-  const last = words.length > 1 ? words.at(-1).charAt(0) : ''
-  return (first + last).toUpperCase()
 }
 
 // The signed-in user at the bottom of the sidebar. Opens a menu with Change password and Log out.
