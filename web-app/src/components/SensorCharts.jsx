@@ -77,10 +77,16 @@ const ZERO_BAR_SIZE = 2
 // Temperature, humidity, motion and battery charts for the sensor dashboard. `nodes` is the
 // page's sensor_node_latest rows: they give each node its name and colour, and the battery chart
 // its values. The readings come grouped by hour or day from report_sensor_chart (016). They
-// reload when the time range changes and whenever `refreshKey` changes (the page's Refresh
-// button), but not on the page's automatic refresh: hourly averages barely move in 15 seconds,
-// and each reload makes the database group up to a week of readings again.
-export default function SensorCharts({ nodes, refreshKey }) {
+// reload when the time range changes, whenever `refreshKey` changes (the page's Refresh button),
+// and when the page's automatic refresh brings a newer reading (the newest last_received_at in
+// `nodes` changes). Not on every automatic refresh: each reload makes the database group up to a
+// week of readings again, which is wasted when nothing new has arrived. Each load's period ends at
+// the moment it runs, so without the reload on new readings, anything that arrived after the page
+// opened (even in the current hour) would be left out of the charts and sparklines.
+// `onHourlyReadings` (optional, should be stable, e.g. a state setter) is called after each load
+// with { rows, now }: the hourly rows and the time the period ends, or null if they failed to
+// load. The page builds the node cards' sparklines from them, so they need no query of their own.
+export default function SensorCharts({ nodes, refreshKey, onHourlyReadings }) {
   const { getChartReadings, getAlertThresholds } = useSensors()
   const [range, setRange] = useState('24h')
   // Kept with the range and refresh it was loaded for, so a new range shows as loading rather
@@ -88,6 +94,14 @@ export default function SensorCharts({ nodes, refreshKey }) {
   const [result, setResult] = useState(null)
   const [thresholds, setThresholds] = useState(null)
   const requestKey = `${range}|${refreshKey}`
+  // When the server last got a reading from any node. A change means new readings, so the charts
+  // reload in the background: the current charts stay on screen until the new ones are back,
+  // rather than showing as loading on every new reading. It isn't part of requestKey for that reason.
+  const newestReceivedAt = nodes.reduce(
+    (newest, node) =>
+      node.last_received_at && (!newest || node.last_received_at > newest) ? node.last_received_at : newest,
+    null,
+  )
 
   // Hourly rows feed the temperature and humidity lines, and motion for 24h. For 7d, motion is
   // per day, so a second, daily call runs alongside.
@@ -104,6 +118,7 @@ export default function SensorCharts({ nodes, refreshKey }) {
 
     Promise.all([hourly, motion]).then(([hourlyResult, motionResult]) => {
       if (cancelled) return
+      onHourlyReadings?.(hourlyResult.error ? null : { rows: hourlyResult.data, now: period.to })
       setResult({
         key: `${range}|${refreshKey}`,
         period,
@@ -115,7 +130,8 @@ export default function SensorCharts({ nodes, refreshKey }) {
     return () => {
       cancelled = true
     }
-  }, [range, refreshKey, getChartReadings])
+    // newestReceivedAt isn't read inside: it is only here to reload when new readings arrive
+  }, [range, refreshKey, newestReceivedAt, getChartReadings, onHourlyReadings])
 
   // Loaded once: alert limits rarely change
   useEffect(() => {

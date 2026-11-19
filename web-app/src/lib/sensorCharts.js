@@ -151,6 +151,24 @@ export function toMotionRows(rows, buckets, bucketMs, seriesByNode) {
   return chartRows
 }
 
+// The last 24 hours of average temperature for each node, for the sparklines on the node cards.
+// `rows` are hourly report_sensor_chart rows covering at least the 24 hours before `now` (either
+// chart range does), so no extra query is needed. Returns a Map of node id to 24 values, oldest
+// hour first, null for an hour with no temperature. Nodes with no temperature in the 24 hours are
+// left out.
+export function temperatureSparklines(rows, now) {
+  const { lineBuckets } = chartWindow('24h', now)
+  const byNode = new Map()
+
+  for (const row of rows) {
+    const index = bucketIndex(row.bucket_start, lineBuckets, HOUR_MS)
+    if (row.avg_temperature == null || index === -1) continue
+    if (!byNode.has(row.sensor_node_id)) byNode.set(row.sensor_node_id, lineBuckets.map(() => null))
+    byNode.get(row.sensor_node_id)[index] = Number(row.avg_temperature)
+  }
+  return byNode
+}
+
 const sarawakWeekdayDay = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Asia/Kuching',
   weekday: 'short',

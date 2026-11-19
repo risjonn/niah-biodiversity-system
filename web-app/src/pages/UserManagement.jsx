@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react'
 import {
   Alert,
+  Avatar,
   Button,
   Chip,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  InputAdornment,
+  ListItemIcon,
+  ListItemText,
   MenuItem,
   Paper,
   Stack,
@@ -19,6 +23,8 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { alpha } from '@mui/material/styles'
+import SearchIcon from '@mui/icons-material/Search'
 import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
 import TableSkeleton from '../components/TableSkeleton'
@@ -26,11 +32,16 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { useUsers, userRoleLabels, userRoles } from '../hooks/useUsers'
 import { formatDate } from '../lib/formatDateTime'
+import { roleIcons } from '../lib/roles'
+import { avatarColorOf, initialsOf } from '../lib/userDisplay'
 
 // The table's headings, shared with its loading skeleton
 const COLUMNS = ['Name', 'Email', 'Role', 'Created']
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// Initials avatar size in the table, in px
+const AVATAR_SIZE = 36
 
 export default function UserManagement() {
   const { user: currentUser } = useAuth()
@@ -41,6 +52,8 @@ export default function UserManagement() {
   const [createOpen, setCreateOpen] = useState(false)
   // { email, password } of the account just created, shown once for the admin to pass on
   const [tempPassword, setTempPassword] = useState(null)
+  // Filters the loaded users by name or email, in the browser
+  const [search, setSearch] = useState('')
   const toast = useToast()
 
   useEffect(() => {
@@ -54,6 +67,12 @@ export default function UserManagement() {
   }, [fetchUsers])
 
   const users = result?.data ?? []
+  const query = search.trim().toLowerCase()
+  const shownUsers = query
+    ? users.filter((user) =>
+        [user.full_name, user.email].some((value) => value?.toLowerCase().includes(query)),
+      )
+    : users
 
   async function handleRoleChange(user, role) {
     if (busyIds.has(user.id) || role === user.role) return
@@ -92,13 +111,7 @@ export default function UserManagement() {
     <Stack spacing={3}>
       <PageHeader
         title="Users"
-        subtitle={
-          result && !result.error
-            ? users.length === 1
-              ? '1 account'
-              : `${users.length} accounts`
-            : null
-        }
+        subtitle={result && !result.error ? accountCount(shownUsers.length, users.length, query) : null}
         action={
           <Button variant="contained" onClick={() => setCreateOpen(true)}>
             Add user
@@ -120,6 +133,34 @@ export default function UserManagement() {
       ) : null}
 
       {users.length > 0 ? (
+        <TextField
+          type="search"
+          size="small"
+          label="Search users"
+          placeholder="Name or email"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          sx={{ width: { xs: '100%', sm: (theme) => theme.spacing(45) } }}
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" aria-hidden="true" />
+                </InputAdornment>
+              ),
+            },
+          }}
+        />
+      ) : null}
+
+      {users.length > 0 && shownUsers.length === 0 ? (
+        <EmptyState
+          message={`No users match "${search.trim()}"`}
+          action={<Button onClick={() => setSearch('')}>Clear search</Button>}
+        />
+      ) : null}
+
+      {shownUsers.length > 0 ? (
         <TableContainer component={Paper} variant="outlined">
           <Table>
             <TableHead>
@@ -130,7 +171,7 @@ export default function UserManagement() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {users.map((user) => (
+              {shownUsers.map((user) => (
                 <UserRow
                   key={user.id}
                   user={user}
@@ -158,16 +199,42 @@ export default function UserManagement() {
   )
 }
 
+// "12 accounts", or "3 of 12 accounts" while a search is filtering them
+function accountCount(shown, total, query) {
+  const accounts = total === 1 ? '1 account' : `${total.toLocaleString()} accounts`
+  return query ? `${shown.toLocaleString()} of ${accounts}` : accounts
+}
+
 function UserRow({ user, isSelf, busy, onRoleChange }) {
+  const avatarColor = avatarColorOf(user.full_name)
+
   return (
     <TableRow>
-      <TableCell>{user.full_name}</TableCell>
+      <TableCell>
+        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+          <Avatar
+            aria-hidden="true"
+            sx={(theme) => ({
+              width: AVATAR_SIZE,
+              height: AVATAR_SIZE,
+              typography: 'body2',
+              fontWeight: 600,
+              bgcolor: alpha(theme.palette[avatarColor].main, 0.16),
+              // The dark shade keeps the letters clear on the pale tile
+              color: theme.palette[avatarColor].dark,
+            })}
+          >
+            {initialsOf(user.full_name, user.role)}
+          </Avatar>
+          <span>{user.full_name}</span>
+        </Stack>
+      </TableCell>
       <TableCell>{user.email}</TableCell>
       <TableCell>
         {/* You can't change your own role, so the last admin can't lock everyone out. Your row
-            shows the role as plain text instead of a dropdown. */}
+            shows the role as a chip instead of a dropdown. */}
         {isSelf ? (
-          <Chip size="small" label={`${userRoleLabels[user.role] ?? user.role} (you)`} />
+          <RoleChip role={user.role} suffix=" (you)" />
         ) : (
           <TextField
             select
@@ -175,21 +242,46 @@ function UserRow({ user, isSelf, busy, onRoleChange }) {
             value={user.role ?? ''}
             onChange={(event) => onRoleChange(event.target.value)}
             disabled={busy}
-            slotProps={{ htmlInput: { 'aria-label': `Role for ${user.full_name}` } }}
+            slotProps={{
+              htmlInput: { 'aria-label': `Role for ${user.full_name}` },
+              select: { renderValue: (role) => <RoleChip role={role} /> },
+            }}
             // The same width for every role, wide enough for the longest ("Conservation officer")
             // so no label is cut off and the column doesn't shift with the label
-            sx={{ width: (theme) => theme.spacing(28) }}
+            sx={{ width: (theme) => theme.spacing(32) }}
           >
-            {userRoles.map((role) => (
-              <MenuItem key={role} value={role}>
-                {userRoleLabels[role]}
-              </MenuItem>
-            ))}
+            {userRoles.map((role) => {
+              const Icon = roleIcons[role]
+              return (
+                <MenuItem key={role} value={role}>
+                  <ListItemIcon>
+                    <Icon fontSize="small" aria-hidden="true" />
+                  </ListItemIcon>
+                  <ListItemText>{userRoleLabels[role]}</ListItemText>
+                </MenuItem>
+              )
+            })}
           </TextField>
         )}
       </TableCell>
       <TableCell>{formatDate(user.created_at)}</TableCell>
     </TableRow>
+  )
+}
+
+// The role's label with its icon (botanist, officer, admin), and an optional suffix like " (you)"
+function RoleChip({ role, suffix = '' }) {
+  const Icon = roleIcons[role]
+
+  return (
+    <Chip
+      size="small"
+      variant="outlined"
+      icon={Icon ? <Icon aria-hidden="true" /> : undefined}
+      label={`${userRoleLabels[role] ?? role}${suffix}`}
+      // Inside the role dropdown, keep the dropdown's pointer rather than the chip's text cursor
+      sx={{ cursor: 'inherit' }}
+    />
   )
 }
 

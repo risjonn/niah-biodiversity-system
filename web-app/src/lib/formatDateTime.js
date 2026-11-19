@@ -81,6 +81,14 @@ export function sarawakMonthKeyOf(value) {
   return `${parts.year}-${String(MONTH_NAMES.indexOf(parts.month) + 1).padStart(2, '0')}`
 }
 
+// The day in Sarawak as 'YYYY-MM-DD', the format of a date input, or null for no value
+export function sarawakDateKeyOf(value) {
+  const parts = partsOf(value)
+  if (!parts) return null
+  const month = String(MONTH_NAMES.indexOf(parts.month) + 1).padStart(2, '0')
+  return `${parts.year}-${month}-${String(parts.day).padStart(2, '0')}`
+}
+
 // "2 pm", the hour on its own, or null for no value. For chart axes, where the minutes are
 // always :00.
 export function formatHour(value) {
