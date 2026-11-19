@@ -11,9 +11,10 @@ import ScientificName from '../components/ScientificName'
 import SkeletonRows from '../components/Skeleton'
 import SyncStatusChip from '../components/SyncStatusChip'
 import { useSync } from '../context/SyncContext'
+import { countPlantPhotos } from '../hooks/usePlantPhoto'
 import { usePlants } from '../hooks/usePlants'
 import { useSpecies } from '../hooks/useSpecies'
-import { queuedPhotoUri, queuedRecordAsPlant } from '../lib/queuedRecord'
+import { queuedCoverUri, queuedRecordAsPlant } from '../lib/queuedRecord'
 import { reviewStatuses, reviewStatusShortLabels } from '../lib/reviewStatus'
 import { formatRelativeTime } from '../lib/sarawakTime'
 import { theme } from '../theme/theme'
@@ -43,6 +44,8 @@ export default function MyRecordsScreen({ navigation, route }) {
   const { records, syncing, syncedVersion, syncNow, retry, discard, markShown } = useSync()
 
   const [plants, setPlants] = useState([])
+  // How many photos each server record has, by plant id, for the "+2" badge
+  const [photoCounts, setPhotoCounts] = useState({})
   const [speciesById, setSpeciesById] = useState(() => new Map())
   // True until the server records have loaded once
   const [loading, setLoading] = useState(true)
@@ -83,6 +86,11 @@ export default function MyRecordsScreen({ navigation, route }) {
       setSpeciesById(new Map(speciesResult.data.map((species) => [species.id, species])))
     }
     setLoading(false)
+    // The badges come after the list, from one batched count; without them the covers still show
+    if (!plantsResult.error) {
+      const counts = await countPlantPhotos(plantsResult.data.map((plant) => plant.id))
+      setPhotoCounts(counts.data)
+    }
   }
 
   // The effects below always call the latest loadRecords
@@ -110,8 +118,12 @@ export default function MyRecordsScreen({ navigation, route }) {
     setRefreshing(false)
   }
 
-  const serverIds = new Set(plants.map((plant) => plant.id))
   const unsynced = records.filter((record) => record.status !== 'synced')
+  // A record whose plant is saved but whose photos aren't added yet is already in the server list;
+  // it shows only in the queue until it has finished
+  const unsyncedIds = new Set(unsynced.map((record) => record.id))
+  const serverPlants = plants.filter((plant) => !unsyncedIds.has(plant.id))
+  const serverIds = new Set(plants.map((plant) => plant.id))
   // Synced records not in the server list yet, e.g. while offline: shown from the queue so the
   // botanist still has their QR codes
   const recentlySynced = records.filter(
@@ -145,7 +157,7 @@ export default function MyRecordsScreen({ navigation, route }) {
 
   // Synced records from the queue, shaped like server rows. They are saved, so pending review.
   const queuedAsPlants = recentlySynced.map(queuedRecordAsPlant)
-  const allRecords = [...queuedAsPlants, ...plants].sort(byNewest)
+  const allRecords = [...queuedAsPlants, ...serverPlants].sort(byNewest)
   const counts = {
     all: allRecords.length + unsynced.length,
     // Records waiting to sync will be pending review once they're saved
@@ -187,7 +199,9 @@ export default function MyRecordsScreen({ navigation, route }) {
   function handleDiscard(record) {
     Alert.alert(
       'Discard record',
-      `Discard this ${record.species_scientific_name} record? It hasn't been saved to the server and will be deleted from this phone.`,
+      record.plant_saved
+        ? `The ${record.species_scientific_name} record is already saved as ${record.qr_code}, so it stays in your records without the photos that couldn't be added. Discard those photos from this phone?`
+        : `Discard this ${record.species_scientific_name} record? It hasn't been saved to the server and will be deleted from this phone, with its photos.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -295,6 +309,7 @@ export default function MyRecordsScreen({ navigation, route }) {
             <RecordCard
               key={plant.id}
               plant={plant}
+              photoCount={photoCounts[plant.id] ?? 0}
               species={speciesById.get(plant.species_id)}
               now={now}
               onPress={() => openRecord(plant)}
@@ -312,7 +327,7 @@ function byNewest(a, b) {
 
 // One saved record: thumbnail, species, status, QR code and when it was recorded. Opens the
 // record's detail screen.
-function RecordCard({ plant, species, now, onPress }) {
+function RecordCard({ plant, photoCount, species, now, onPress }) {
   const scientificName = species?.scientific_name ?? plant.species_scientific_name
   const commonName = species?.common_name ?? plant.species_common_name
   const ago = formatRelativeTime(plant.recorded_at, now)
@@ -324,7 +339,7 @@ function RecordCard({ plant, species, now, onPress }) {
       accessibilityHint="Opens the record"
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
-      <PlantThumbnail photoPath={plant.photo_url} />
+      <PlantThumbnail photoPath={plant.photo_url} count={photoCount} />
       <View style={styles.cardText}>
         {scientificName ? (
           <ScientificName style={styles.scientificName}>{scientificName}</ScientificName>
@@ -346,15 +361,16 @@ function RecordCard({ plant, species, now, onPress }) {
   )
 }
 
-// A record still on the phone. It has no QR code or review status yet, so it shows its sync state
-// instead; one that couldn't sync gets the reason with Try again and Discard.
+// A record still on the phone. It has no review status yet, so it shows its sync state instead;
+// one that couldn't sync gets the reason with Try again and Discard. A record whose plant is
+// already saved (only its photos are left) shows its QR code too, so the plant can be tagged.
 function QueuedRecordCard({ record, now, busy, onRetry, onDiscard }) {
   const failed = record.status === 'failed'
 
   return (
     <View style={styles.queuedCard}>
       <View style={styles.queuedRow}>
-        <PlantThumbnail uri={queuedPhotoUri(record.local_photo_path)} />
+        <PlantThumbnail uri={queuedCoverUri(record)} count={record.photos?.length ?? 0} />
         <View style={styles.cardText}>
           <ScientificName style={styles.scientificName}>{record.species_scientific_name}</ScientificName>
           {record.species_common_name ? (
@@ -362,6 +378,11 @@ function QueuedRecordCard({ record, now, busy, onRetry, onDiscard }) {
           ) : null}
           <View style={styles.meta}>
             <SyncStatusChip status={record.status} />
+            {record.plant_saved && record.qr_code ? (
+              <Text style={styles.metaText} selectable>
+                {record.qr_code}
+              </Text>
+            ) : null}
           </View>
           <Text style={styles.metaText}>{formatRelativeTime(record.recorded_at, now)}</Text>
         </View>

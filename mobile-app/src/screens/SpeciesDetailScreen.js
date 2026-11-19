@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
 import ConservationStatusChip from '../components/ConservationStatusChip'
 import EmptyState from '../components/EmptyState'
-import PhotoBanner from '../components/PhotoBanner'
+import PhotoGallery from '../components/PhotoGallery'
 import ScientificName from '../components/ScientificName'
 import { usePlants } from '../hooks/usePlants'
 import { useSpecies } from '../hooks/useSpecies'
@@ -64,12 +64,8 @@ export default function SpeciesDetailScreen({ route, navigation }) {
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.container}>
-      <PhotoBanner
-        uri={species.reference_photo_url}
-        alt={`Reference photo of ${species.scientific_name}`}
-        tint={theme.chart.conservationStatus[species.conservation_status]}
-        emptyText="No reference photo yet"
-      />
+      {/* Keyed by species, so another one starts from its own cover */}
+      <SpeciesPhotos key={species.id} species={species} />
 
       <View style={styles.titleBlock}>
         <ScientificName style={styles.scientificName}>{species.scientific_name}</ScientificName>
@@ -90,6 +86,39 @@ export default function SpeciesDetailScreen({ route, navigation }) {
       <TextSection title="Description" text={species.description} />
       <TextSection title="Cultural significance" text={species.cultural_significance} />
     </ScrollView>
+  )
+}
+
+// The species' photos (species_photos, public URLs). The cover from the species list shows
+// straight away (also offline), and the rest join it once they load.
+function SpeciesPhotos({ species }) {
+  const { fetchSpeciesPhotos } = useSpecies()
+  const cover = species.reference_photo_url
+  const [urls, setUrls] = useState(cover ? [cover] : [])
+
+  useEffect(() => {
+    let cancelled = false
+    fetchSpeciesPhotos(species.id).then((result) => {
+      if (!cancelled && result.data.length > 0) setUrls(result.data)
+    })
+    return () => {
+      cancelled = true
+    }
+    // fetchSpeciesPhotos is a module function, the same on every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [species.id])
+
+  const name = species.scientific_name
+  return (
+    <PhotoGallery
+      photos={urls.map((url, index) => ({
+        key: url,
+        uri: url,
+        alt: urls.length > 1 ? `Photo ${index + 1} of ${name}` : `Reference photo of ${name}`,
+      }))}
+      tint={theme.chart.conservationStatus[species.conservation_status]}
+      emptyText="No reference photo yet"
+    />
   )
 }
 

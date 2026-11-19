@@ -36,7 +36,7 @@ export function SyncProvider({ children }) {
   const { user } = useAuth()
   const userId = user?.id ?? null
   const { submitPlant, fetchPlant } = usePlants()
-  const { uploadPlantPhoto } = usePlantPhoto()
+  const { uploadPlantPhoto, addPlantPhotos, fetchPlantPhotoPaths, removePlantPhotos } = usePlantPhoto()
   const { fetchSpecies } = useSpecies()
 
   // Every queued record for the signed-in user, oldest first (rows of lib/offlineQueue.js)
@@ -73,7 +73,15 @@ export function SyncProvider({ children }) {
   // Declared before the effects below so it is up to date when they run.
   const latest = useRef({})
   useEffect(() => {
-    latest.current = { userId, submitPlant, fetchPlant, uploadPlantPhoto, savedPause }
+    latest.current = {
+      userId,
+      submitPlant,
+      fetchPlant,
+      uploadPlantPhoto,
+      addPlantPhotos,
+      fetchPlantPhotoPaths,
+      savedPause,
+    }
   })
 
   const refresh = useCallback(async () => {
@@ -111,6 +119,8 @@ export function SyncProvider({ children }) {
           uploadPlantPhoto: hooks.uploadPlantPhoto,
           submitPlant: hooks.submitPlant,
           fetchPlant: hooks.fetchPlant,
+          addPlantPhotos: hooks.addPlantPhotos,
+          fetchPlantPhotoPaths: hooks.fetchPlantPhotoPaths,
           onChange: refresh,
         })
         if (result.synced > 0) setSyncedVersion((version) => version + 1)
@@ -174,7 +184,8 @@ export function SyncProvider({ children }) {
   // data is the queued row, error a message ready to show if it couldn't be saved (nothing is
   // queued then), and attempt the sync started for it (see sync).
   //   plant: { species, height_cm, morphological_notes, location_description, latitude,
-  //            longitude, photoUri }
+  //            longitude, photoUris }
+  //   photoUris: up to 5 prepared photos (lib/photos.js), cover first
   const queueRecord = useCallback(
     async (plant) => {
       const forUser = latest.current.userId
@@ -209,12 +220,15 @@ export function SyncProvider({ children }) {
     [refresh, sync],
   )
 
+  // Deletes a failed record and its photos from the phone, then the files it had already uploaded
+  // that no plant uses (see removePlantPhotos)
   const discard = useCallback(
     async (id) => {
-      await discardPlant(id)
+      const { storagePaths } = await discardPlant(id)
       await refresh()
+      await removePlantPhotos(storagePaths)
     },
-    [refresh],
+    [refresh, removePlantPhotos],
   )
 
   // Synced records whose QR code has been shown in My Records; removed at the next clean-up
@@ -246,7 +260,7 @@ export function SyncProvider({ children }) {
       latitude: NIAH_CENTRE.latitude + (Math.random() - 0.5) * 0.02,
       longitude: NIAH_CENTRE.longitude + (Math.random() - 0.5) * 0.02,
       recorded_at: recordedAt,
-      photoUri: null,
+      photoUris: [],
     }))
 
     try {

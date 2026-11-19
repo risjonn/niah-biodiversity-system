@@ -5,20 +5,32 @@ import {
   getQueuedPhoto,
   markFailed,
   markPending,
+  markPhotoRowsSaved,
+  markPhotoUploaded,
+  markPlantSaved,
   markSynced,
   markSyncing,
-  setUploadedPhotoPath,
 } from './offlineQueue'
 
 // Sends queued plant records (lib/offlineQueue.js) to the server, oldest first, one at a time.
 // A network error stops the run and leaves the record waiting for the next one; any other error
 // marks that record failed, with a message ready to show, and the run carries on.
+//
+// Each record goes in three steps, and the queue remembers each one as it succeeds, so a retry
+// (automatic, or Try again) only does what is left:
+//   a. every photo is uploaded to its own storage_path (a file already there counts as uploaded:
+//      the path is unique to that photo, so it can only be this photo from an earlier attempt)
+//   b. the plant row is inserted, without photo_url, with the id made on the phone (if an earlier
+//      attempt saved it but the reply was lost, the duplicate id says so and it is read back)
+//   c. the plant_photos rows are inserted at positions 0..n-1; the trigger in 017 then sets
+//      photo_url to the cover. Rows that may already exist from an earlier attempt are looked up
+//      first, so only the missing ones are added.
 
 // Photo error codes from usePlantPhoto that may work if tried again later
 const TRANSIENT_PHOTO_CODES = ['network', 'server', 'auth']
 
 const MISSING_PHOTO_MESSAGE =
-  'The photo saved with this record is missing from the phone. Discard this record and register the plant again.'
+  'A photo saved with this record is missing from the phone. Discard this record and register the plant again.'
 const ID_TAKEN_MESSAGE =
   'This record could not be saved because its ID is already in use. Discard it and register the plant again.'
 const UNEXPECTED_MESSAGE = 'Something went wrong while syncing this record. Try again.'
@@ -33,8 +45,9 @@ let currentRun = null
 let rerunRequested = false
 let latestOptions = null
 
-// options: { userId, uploadPlantPhoto, submitPlant, fetchPlant, onChange }
-//   The three functions are usePlantPhoto's and usePlants' for the signed-in user. onChange is
+// options: { userId, uploadPlantPhoto, submitPlant, fetchPlant, addPlantPhotos,
+//            fetchPlantPhotoPaths, onChange }
+//   The five functions are usePlantPhoto's and usePlants' for the signed-in user. onChange is
 //   called whenever a record's status changes.
 // Resolves to { synced, failed, stopped }: how many records synced and failed, and why the run
 // stopped early ('network' or 'signed_out') or null if it got through the whole queue.
@@ -111,27 +124,46 @@ async function syncQueuedPlants(options) {
 }
 
 // Resolves to { type: 'synced', qrCode }, { type: 'failed', message } or { type: 'retry', message }
-async function syncRecord(record, { userId, uploadPlantPhoto, submitPlant, fetchPlant }) {
-  let photoPath = record.uploaded_photo_path
+async function syncRecord(record, options) {
+  const photos = record.photos ?? []
 
-  // a. The photo goes up first, under the record's own id so a retry finds it already there
-  if (record.local_photo_path && !photoPath) {
-    const photo = getQueuedPhoto(record.local_photo_path)
-    if (!photo.exists) return { type: 'failed', message: MISSING_PHOTO_MESSAGE }
+  // a. Every photo not uploaded yet, cover first
+  for (const photo of photos) {
+    if (photo.uploaded) continue
+    const file = photo.local_path ? getQueuedPhoto(photo.local_path) : null
+    if (!file?.exists) return { type: 'failed', message: MISSING_PHOTO_MESSAGE }
 
-    const path = `${userId}/${record.id}.jpg`
-    const upload = await uploadPlantPhoto(photo.uri, path)
+    const upload = await options.uploadPlantPhoto(file.uri, photo.storage_path)
     if (upload.error && upload.code !== 'already_exists') {
       return TRANSIENT_PHOTO_CODES.includes(upload.code)
         ? { type: 'retry', message: upload.error }
         : { type: 'failed', message: upload.error }
     }
-    await setUploadedPhotoPath(record.id, path)
-    photoPath = path
+    await markPhotoUploaded(record.id, photo.position)
   }
 
-  // b. The record, with the id generated on the phone, so if an earlier attempt was saved but its
-  // response was lost, this one fails as a duplicate instead of saving the plant twice
+  // b. The plant, unless an earlier attempt saved it
+  let qrCode = record.qr_code
+  let insertedNow = false
+  if (!record.plant_saved) {
+    const saved = await savePlant(record, options)
+    if (saved.type !== 'saved') return saved
+    qrCode = saved.qrCode
+    insertedNow = saved.insertedNow
+    await markPlantSaved(record.id, qrCode)
+  }
+
+  // c. The plant_photos rows not saved yet
+  const rows = await savePhotoRows(record, photos, { ...options, qrCode, insertedNow })
+  if (rows) return rows
+  return { type: 'synced', qrCode }
+}
+
+// Resolves to { type: 'saved', qrCode, insertedNow }, or a failed or retry outcome
+async function savePlant(record, { submitPlant, fetchPlant }) {
+  // With the id generated on the phone, so if an earlier attempt was saved but its response was
+  // lost, this one fails as a duplicate instead of saving the plant twice. No photo_url: the
+  // photos are added as plant_photos rows, and the database sets photo_url to the cover.
   const insert = await submitPlant({
     id: record.id,
     recorded_at: record.recorded_at,
@@ -141,13 +173,12 @@ async function syncRecord(record, { userId, uploadPlantPhoto, submitPlant, fetch
     location_description: record.location_description,
     latitude: record.latitude,
     longitude: record.longitude,
-    photo_url: photoPath ?? null,
   })
-  if (!insert.error) return { type: 'synced', qrCode: insert.data.qr_code }
+  if (!insert.error) return { type: 'saved', qrCode: insert.data.qr_code, insertedNow: true }
 
   if (insert.alreadySaved) {
     const existing = await fetchPlant(record.id)
-    if (existing.data) return { type: 'synced', qrCode: existing.data.qr_code }
+    if (existing.data) return { type: 'saved', qrCode: existing.data.qr_code, insertedNow: false }
     if (existing.error && isTransientPlantError(existing)) {
       return { type: 'retry', message: existing.error }
     }
@@ -158,6 +189,58 @@ async function syncRecord(record, { userId, uploadPlantPhoto, submitPlant, fetch
   // species_id no longer matches a species
   if (insert.code === '23503') return { type: 'failed', message: SPECIES_REMOVED_MESSAGE }
   return { type: 'failed', message: insert.error }
+}
+
+// Adds the photos' plant_photos rows that aren't saved yet. Resolves to null when they all are,
+// or to a failed or retry outcome. A failure here leaves the plant saved, so the next attempt
+// only adds the rows.
+async function savePhotoRows(record, photos, { addPlantPhotos, fetchPlantPhotoPaths, qrCode, insertedNow }) {
+  let missing = photos.filter((photo) => !photo.row_saved)
+  if (missing.length === 0) return null
+
+  // Rows an earlier attempt (or, for a record queued before multiple photos, the old photo_url
+  // trigger) may already have added. A plant inserted just now has none.
+  async function dropRowsAlreadySaved() {
+    const existing = await fetchPlantPhotoPaths(record.id)
+    if (existing.error) return existing
+    const onServer = new Set(existing.data)
+    const found = missing.filter((photo) => onServer.has(photo.storage_path))
+    await markPhotoRowsSaved(record.id, found.map((photo) => photo.position))
+    missing = missing.filter((photo) => !onServer.has(photo.storage_path))
+    return null
+  }
+
+  if (!insertedNow) {
+    const lookup = await dropRowsAlreadySaved()
+    if (lookup) return photoRowsOutcome(lookup, qrCode)
+    if (missing.length === 0) return null
+  }
+
+  const toRows = () => missing.map((photo) => ({ storage_path: photo.storage_path, position: photo.position }))
+  let added = await addPlantPhotos(record.id, toRows())
+  // A row is already there (unique plant and position, or unique file): look again and add only
+  // what is still missing
+  if (added.error && added.code === '23505') {
+    const lookup = await dropRowsAlreadySaved()
+    if (lookup) return photoRowsOutcome(lookup, qrCode)
+    added = missing.length > 0 ? await addPlantPhotos(record.id, toRows()) : { error: null }
+  }
+  if (added.error) return photoRowsOutcome(added, qrCode)
+
+  await markPhotoRowsSaved(record.id, missing.map((photo) => photo.position))
+  return null
+}
+
+function photoRowsOutcome(failure, qrCode) {
+  if (isTransientPlantError(failure)) return { type: 'retry', message: failure.error }
+  return {
+    type: 'failed',
+    message: `The plant was saved as ${qrCode}, but its photos couldn't be added: ${lowerFirst(failure.error)}`,
+  }
+}
+
+function lowerFirst(text) {
+  return text ? text.charAt(0).toLowerCase() + text.slice(1) : 'unknown error.'
 }
 
 // Whether a usePlants failure ({ code, status }) may work if tried again later

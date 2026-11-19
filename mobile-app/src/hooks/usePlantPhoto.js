@@ -68,7 +68,116 @@ export function usePlantPhoto() {
     return { data: data.signedUrl, error: null }
   }
 
-  return { uploadPlantPhoto, getPlantPhotoUrl }
+  return {
+    uploadPlantPhoto,
+    getPlantPhotoUrl,
+    getPlantPhotos,
+    countPlantPhotos,
+    addPlantPhotos,
+    fetchPlantPhotoPaths,
+    removePlantPhotos,
+  }
+}
+
+// Long enough to look through a record, short enough that a copied link soon stops working
+const SIGNED_URL_SECONDS = 60 * 60
+
+// Every photo of one plant, cover first (plant_photos, database/schema/017), each signed for
+// viewing. All of them are signed in one request. `coverPath` is the plant's photo_url, used when
+// it has no plant_photos rows. Works for guests too: they can read the rows and sign the files of
+// approved plants that aren't monitored, and get no rows for any other plant.
+// Resolves to { data: [{ path, uri }], error }; uri is null for a photo storage couldn't sign.
+export async function getPlantPhotos(plantId, coverPath = null) {
+  const { data: rows, error } = await supabase
+    .from('plant_photos')
+    .select('storage_path, position')
+    .eq('plant_id', plantId)
+    .order('position')
+
+  if (error) return { data: [], error: queryErrorMessage(error) }
+  const paths = rows.length > 0 ? rows.map((row) => row.storage_path) : coverPath ? [coverPath] : []
+  if (paths.length === 0) return { data: [], error: null }
+
+  const signed = await supabase.storage.from(BUCKET).createSignedUrls(paths, SIGNED_URL_SECONDS)
+  if (signed.error) return { data: [], error: 'The photos could not be loaded. Try again later.' }
+  const urls = new Map(
+    (signed.data ?? []).filter((item) => item.signedUrl && !item.error).map((item) => [item.path, item.signedUrl]),
+  )
+  return { data: paths.map((path) => ({ path, uri: urls.get(path) ?? null })), error: null }
+}
+
+// How many photos each of these plants has, for the "+2" badge on list thumbnails. Resolves to
+// { data: { [plantId]: count }, error }, leaving out plants with none. One request per 100 plants
+// (at most 500 rows, under the API's 1000-row limit) rather than one per plant.
+export async function countPlantPhotos(plantIds) {
+  const ids = [...new Set(plantIds.filter(Boolean))]
+  const counts = {}
+  for (let start = 0; start < ids.length; start += COUNT_BATCH_SIZE) {
+    const { data, error } = await supabase
+      .from('plant_photos')
+      .select('plant_id')
+      .in('plant_id', ids.slice(start, start + COUNT_BATCH_SIZE))
+    if (error) return { data: counts, error: queryErrorMessage(error) }
+    for (const row of data) counts[row.plant_id] = (counts[row.plant_id] ?? 0) + 1
+  }
+  return { data: counts, error: null }
+}
+
+const COUNT_BATCH_SIZE = 100
+
+// Adds a plant's photos: rows is [{ storage_path, position }]. Row-level security allows this only
+// for the plant's recorder while it is pending review, for files in their own folder. Resolves to
+// { data: true, error, code, status }, with code and status as from usePlants (for the sync queue).
+export async function addPlantPhotos(plantId, rows) {
+  const { error } = await supabase
+    .from('plant_photos')
+    .insert(rows.map((row) => ({ plant_id: plantId, storage_path: row.storage_path, position: row.position })))
+  if (error) return { data: null, error: photoRowErrorMessage(error), code: error.code ?? '', status: error.status }
+  return { data: true, error: null }
+}
+
+// The storage paths of a plant's photo rows, as { data: [path], error, code, status }
+export async function fetchPlantPhotoPaths(plantId) {
+  const { data, error } = await supabase.from('plant_photos').select('storage_path').eq('plant_id', plantId)
+  if (error) return { data: [], error: queryErrorMessage(error), code: error.code ?? '', status: error.status }
+  return { data: data.map((row) => row.storage_path), error: null }
+}
+
+// Removes uploaded files no record uses (a discarded record's). Best effort: resolves to
+// { data: removedCount, error: null } and never fails, since a leftover file in the user's own
+// folder is private and attached to no plant. Storage removes nothing, without an error, for
+// files the user isn't allowed to delete.
+export async function removePlantPhotos(paths) {
+  if (paths.length === 0) return { data: 0, error: null }
+  try {
+    const { data, error } = await supabase.storage.from(BUCKET).remove(paths)
+    if (error) throw error
+    return { data: data?.length ?? 0, error: null }
+  } catch {
+    return { data: 0, error: null }
+  }
+}
+
+function queryErrorMessage(error) {
+  // Request never reached the database (offline, server unreachable)
+  if (!error.code) return 'Unable to reach the server. Check your connection and try again.'
+  return error.message
+}
+
+function photoRowErrorMessage(error) {
+  switch (error.code) {
+    case '':
+    case undefined:
+      return 'Unable to reach the server. Check your connection and try again.'
+    // Row-level security: the record is no longer pending, or isn't the user's
+    case '42501':
+      return 'Photos can only be added to your own records while they wait for review.'
+    // The 5-photo limit (017); its message is written for people
+    case '23514':
+      return error.message
+    default:
+      return error.message
+  }
 }
 
 function base64ToArrayBuffer(base64) {
