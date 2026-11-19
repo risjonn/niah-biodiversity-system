@@ -9,9 +9,11 @@ const CACHE_KEY = 'niah-public-plants-cache'
 const PAGE_SIZE = 1000
 const MAX_PLANTS = 2000
 
-// Only the columns guest mode shows. photo_url is left out: plant photos are in a private bucket.
+// Only the columns guest mode needs. has_photos (database/schema/017) says whether guests can see
+// the plant's own photos (approved, unmonitored plants with photos), so the scan result only looks
+// them up when there are some. The photos themselves are loaded from plant_photos when shown.
 const COLUMNS =
-  'id, species_id, qr_code, height_cm, morphological_notes, latitude, longitude, is_monitored, recorded_at'
+  'id, species_id, qr_code, height_cm, morphological_notes, latitude, longitude, is_monitored, recorded_at, has_photos'
 
 // Approved plants for guest mode, from the plants_public view (coordinates of monitored plants
 // already rounded). Downloads the list when first used and saves it on the phone. Returns

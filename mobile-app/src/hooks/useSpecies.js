@@ -10,7 +10,21 @@ const CACHE_KEY = 'niah-species-cache'
 // (the same pattern as usePlants). `savedAt` is set when the server couldn't be reached and the
 // list saved on the phone was used instead: the ISO time that list was downloaded.
 export function useSpecies() {
-  return { fetchSpecies }
+  return { fetchSpecies, fetchSpeciesPhotos }
+}
+
+// A species' photo URLs, cover first (species_photos, database/schema/017). Public, so this works
+// signed in or as a guest. Resolves to { data: [url], error }; not saved on the phone, so offline
+// it fails and callers show the cover from the species list instead.
+async function fetchSpeciesPhotos(speciesId) {
+  const { data, error } = await supabase
+    .from('species_photos')
+    .select('photo_url, position')
+    .eq('species_id', speciesId)
+    .order('position')
+
+  if (error) return { data: [], error: speciesErrorMessage(error) }
+  return { data: data.map((row) => row.photo_url), error: null }
 }
 
 // Every species, alphabetical by scientific name, with the details guest mode shows. Species are

@@ -11,6 +11,7 @@ import ScientificName from '../components/ScientificName'
 import SkeletonRows, { SkeletonBlock, SkeletonGroup } from '../components/Skeleton'
 import { useAuth } from '../context/AuthContext'
 import { useSync } from '../context/SyncContext'
+import { countPlantPhotos } from '../hooks/usePlantPhoto'
 import { usePlants } from '../hooks/usePlants'
 import { useSpecies } from '../hooks/useSpecies'
 import { reviewStatuses, reviewStatusLabels, reviewStatusShortLabels } from '../lib/reviewStatus'
@@ -32,6 +33,8 @@ export default function BotanistHomeScreen({ navigation }) {
   const { syncedVersion } = useSync()
   // { plants, speciesById } once loaded; kept while reloading so the screen doesn't blank out
   const [data, setData] = useState(null)
+  // How many photos each recent record has, by plant id
+  const [photoCounts, setPhotoCounts] = useState({})
   // The last load's error message, or null
   const [error, setError] = useState(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -53,6 +56,11 @@ export default function BotanistHomeScreen({ navigation }) {
       plants: plantsResult.data,
       speciesById: new Map(speciesResult.data.map((species) => [species.id, species])),
     })
+    // The "+2" badges for the recent records, from one batched count; covers show without them
+    const counts = await countPlantPhotos(
+      plantsResult.data.slice(0, RECENT_COUNT).map((plant) => plant.id),
+    )
+    setPhotoCounts(counts.data)
   }
 
   // The focus and sync effects below always call the latest load
@@ -192,6 +200,7 @@ export default function BotanistHomeScreen({ navigation }) {
                 <RecentRecord
                   key={plant.id}
                   plant={plant}
+                  photoCount={photoCounts[plant.id] ?? 0}
                   species={data.speciesById.get(plant.species_id)}
                   now={now}
                   first={index === 0}
@@ -248,19 +257,20 @@ function Tile({ icon, label, onPress }) {
   )
 }
 
-function RecentRecord({ plant, species, now, first, onPress }) {
+function RecentRecord({ plant, photoCount, species, now, first, onPress }) {
   const name = species?.scientific_name ?? 'Unknown species'
   const ago = formatRelativeTime(plant.recorded_at, now)
+  const photos = photoCount > 1 ? `, ${photoCount} photos` : ''
 
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${name}, ${reviewStatusLabels[plant.review_status] ?? plant.review_status}, recorded ${ago}`}
+      accessibilityLabel={`${name}, ${reviewStatusLabels[plant.review_status] ?? plant.review_status}, recorded ${ago}${photos}`}
       accessibilityHint="Opens the record"
       style={({ pressed }) => [styles.recordRow, !first && styles.recordDivider, pressed && styles.pressed]}
     >
-      <PlantThumbnail photoPath={plant.photo_url} size={THUMBNAIL_SIZE} />
+      <PlantThumbnail photoPath={plant.photo_url} size={THUMBNAIL_SIZE} count={photoCount} />
       <View style={styles.recordText}>
         {species ? (
           <ScientificName style={styles.recordName}>

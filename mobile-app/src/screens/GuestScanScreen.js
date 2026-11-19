@@ -12,10 +12,11 @@ import Ionicons from '@expo/vector-icons/Ionicons'
 import Button from '../components/Button'
 import ConservationStatusChip from '../components/ConservationStatusChip'
 import HeaderBand from '../components/HeaderBand'
-import PhotoBanner from '../components/PhotoBanner'
+import PhotoGallery from '../components/PhotoGallery'
 import QrScanner from '../components/QRScanner'
 import ScientificName from '../components/ScientificName'
 import TextInput from '../components/TextInput'
+import { usePlantPhotos } from '../hooks/usePlantPhotos'
 import { usePublicPlants } from '../hooks/usePublicPlants'
 import { useSpecies } from '../hooks/useSpecies'
 import { QR_CODE_PATTERN, normaliseQrCode } from '../lib/qrCode'
@@ -25,7 +26,7 @@ import { theme } from '../theme/theme'
 // Guest mode: scan a plant's QR tag, or type its code, to see the approved record and its species,
 // or browse the species list. Works offline from the plant and species lists saved on the phone.
 // Guests are not signed in, so only public data is used: the plants_public view (approved plants
-// only), the species table and the species' public reference photos.
+// only), the species table and its public photos, and the photos of approved, unmonitored plants.
 export default function GuestScanScreen({ navigation }) {
   const plants = usePublicPlants()
   const { fetchSpecies } = useSpecies()
@@ -271,9 +272,8 @@ function ActionTile({ icon, label, onPress }) {
   )
 }
 
-// An approved plant: its species (reference photo, names, status, a short description and
-// "Learn more"), then the record's own details. The plant's own photo isn't shown: plant photos
-// are in a private bucket guests can't read.
+// An approved plant: its photos, its species (names, status, a short description and "Learn
+// more"), then the record's own details
 function PlantResult({ plant, species, speciesLoading, onLearnMore }) {
   const latitude = Number(plant.latitude)
   const longitude = Number(plant.longitude)
@@ -282,14 +282,10 @@ function PlantResult({ plant, species, speciesLoading, onLearnMore }) {
 
   return (
     <View style={styles.card} accessibilityLiveRegion="polite">
+      {/* Keyed by plant, so another scan starts its own lookup */}
+      <ScannedPlantPhotos key={plant.id} plant={plant} species={species} />
       {species ? (
         <>
-          <PhotoBanner
-            uri={species.reference_photo_url}
-            alt={`Reference photo of ${species.scientific_name}`}
-            tint={theme.chart.conservationStatus[species.conservation_status]}
-            emptyText="No photo of this species yet"
-          />
           <View style={styles.titleBlock}>
             <ScientificName style={styles.scientificName}>{species.scientific_name}</ScientificName>
             {species.common_name ? <Text style={styles.commonName}>{species.common_name}</Text> : null}
@@ -324,6 +320,45 @@ function PlantResult({ plant, species, speciesLoading, onLearnMore }) {
         value={`${latitude.toFixed(decimals)}, ${longitude.toFixed(decimals)}`}
       />
     </View>
+  )
+}
+
+// The scanned plant's own photos, falling back to its species' cover photo, then to the leaf.
+// Guests can read and sign the photos of approved plants that aren't monitored; for any other
+// plant (or offline) the lookup finds none, and the species photo shows instead. has_photos from
+// the plant list skips the lookup when there is nothing to find; a list saved by an older version
+// of the app doesn't have it, so the lookup runs then.
+function ScannedPlantPhotos({ plant, species }) {
+  const { photos: plantPhotos, loading } = usePlantPhotos(plant.id, null, {
+    enabled: plant.has_photos !== false,
+  })
+  const speciesName = species?.scientific_name
+  const total = plantPhotos.length
+
+  const photos =
+    total > 0
+      ? plantPhotos.map((photo, index) => ({
+          key: photo.path,
+          uri: photo.uri,
+          alt: `Photo ${total > 1 ? `${index + 1} ` : ''}of this ${speciesName ?? 'plant'}`,
+        }))
+      : species?.reference_photo_url
+        ? [
+            {
+              key: species.reference_photo_url,
+              uri: species.reference_photo_url,
+              alt: `Reference photo of ${speciesName}`,
+            },
+          ]
+        : []
+
+  return (
+    <PhotoGallery
+      photos={photos}
+      loading={loading}
+      tint={species ? theme.chart.conservationStatus[species.conservation_status] : undefined}
+      emptyText="No photo of this plant yet"
+    />
   )
 }
 

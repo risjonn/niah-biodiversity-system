@@ -4,9 +4,10 @@ import QRCode from 'react-native-qrcode-svg'
 import Button from '../components/Button'
 import ConservationStatusChip from '../components/ConservationStatusChip'
 import EmptyState from '../components/EmptyState'
-import PhotoBanner from '../components/PhotoBanner'
+import PhotoGallery from '../components/PhotoGallery'
 import ReviewStatusChip from '../components/ReviewStatusChip'
 import ScientificName from '../components/ScientificName'
+import { usePlantPhotos } from '../hooks/usePlantPhotos'
 import { usePlants } from '../hooks/usePlants'
 import { useSpecies } from '../hooks/useSpecies'
 import { formatDateTime } from '../lib/sarawakTime'
@@ -84,11 +85,7 @@ export default function RecordDetailScreen({ route, navigation }) {
         </View>
       ) : null}
 
-      <PhotoBanner
-        photoPath={plant.photo_url}
-        alt={`Photo of ${scientificName ?? 'the plant'}`}
-        emptyText="No photo with this record"
-      />
+      <RecordPhotos plant={plant} name={scientificName ?? 'the plant'} />
 
       <View style={styles.titleBlock}>
         {scientificName ? (
@@ -145,6 +142,23 @@ export default function RecordDetailScreen({ route, navigation }) {
         </View>
       ) : null}
     </ScrollView>
+  )
+}
+
+// The record's photos (plant_photos, falling back to photo_url), signed in one request
+function RecordPhotos({ plant, name }) {
+  const { photos, error, loading } = usePlantPhotos(plant.id, plant.photo_url || null)
+  const total = photos.length
+  return (
+    <PhotoGallery
+      photos={photos.map((photo, index) => ({
+        key: photo.path,
+        uri: photo.uri,
+        alt: total > 1 ? `Photo ${index + 1} of ${name}` : `Photo of ${name}`,
+      }))}
+      loading={loading}
+      emptyText={error ? "The photos can't be shown right now" : 'No photo with this record'}
+    />
   )
 }
 

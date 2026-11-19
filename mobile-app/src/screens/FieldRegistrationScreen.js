@@ -23,6 +23,7 @@ import SyncStatusChip from '../components/SyncStatusChip'
 import TextInput from '../components/TextInput'
 import { useSync } from '../context/SyncContext'
 import { useCurrentLocation } from '../hooks/useCurrentLocation'
+import { MAX_PHOTOS } from '../lib/photos'
 import { queuedRecordAsPlant } from '../lib/queuedRecord'
 import { theme } from '../theme/theme'
 
@@ -39,7 +40,7 @@ const SYNC_WAIT_MS = 15000
 const ACCURACY_GOOD_M = 20
 const ACCURACY_FAIR_M = 50
 
-const EMPTY_FORM = { species: null, height: '', notes: '', locationDescription: '', photo: null }
+const EMPTY_FORM = { species: null, height: '', notes: '', locationDescription: '', photos: [] }
 
 export default function FieldRegistrationScreen({ navigation }) {
   const { records, waitingCount, failedCount, queueRecord } = useSync()
@@ -83,7 +84,7 @@ export default function FieldRegistrationScreen({ navigation }) {
     Keyboard.dismiss()
     setSubmitError(null)
 
-    // Saved on the phone first (photo included), then synced: see context/SyncContext.js
+    // Saved on the phone first (photos included), then synced: see context/SyncContext.js
     setPhase('saving')
     const { data, error, attempt } = await queueRecord({
       species: form.species,
@@ -92,7 +93,7 @@ export default function FieldRegistrationScreen({ navigation }) {
       latitude: location.coords.latitude,
       longitude: location.coords.longitude,
       location_description: form.locationDescription.trim() || null,
-      photoUri: form.photo?.uri ?? null,
+      photoUris: form.photos.map((photo) => photo.uri),
     })
 
     // On failure everything entered stays in the form so it can be submitted again
@@ -203,8 +204,8 @@ export default function FieldRegistrationScreen({ navigation }) {
               />
             </Section>
 
-            <Section title="Photo" note="Optional">
-              <PhotoField value={form.photo} onChange={setField('photo')} disabled={busy} />
+            <Section title="Photos" note={`Optional, up to ${MAX_PHOTOS}`}>
+              <PhotoField value={form.photos} onChange={setField('photos')} disabled={busy} />
             </Section>
 
             <Section title="Location">
