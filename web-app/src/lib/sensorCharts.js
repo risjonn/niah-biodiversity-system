@@ -151,6 +151,46 @@ export function toMotionRows(rows, buckets, bucketMs, seriesByNode) {
   return chartRows
 }
 
+// The Device alerts chart's data, from getDeviceAlertsInPeriod rows ({ sensor_node_id,
+// alert_code, device_alert_code: { severity } }). Returns { rows, series }:
+// - rows: one per code raised in the period, { code, label, severity, total, [series key]: count },
+//   with 0 for a series that didn't raise it. Most raised first, then by label. `labelOf` gives
+//   a code's readable label (deviceCodeLabel in lib/alerts.js, passed in so this file stays free
+//   of React imports).
+// - series: the node series with at least one alert, in legend order, so colours match the
+//   other charts
+// Alerts from nodes missing from `seriesByNode` are left out.
+export function toDeviceAlertRows(alerts, seriesByNode, labelOf) {
+  const byCode = new Map()
+  const usedKeys = new Set()
+
+  for (const alert of alerts) {
+    const series = seriesByNode.get(alert.sensor_node_id)
+    if (!series || !alert.alert_code) continue
+    let row = byCode.get(alert.alert_code)
+    if (!row) {
+      row = {
+        code: alert.alert_code,
+        label: labelOf(alert.alert_code),
+        severity: alert.device_alert_code?.severity ?? null,
+        total: 0,
+      }
+      byCode.set(alert.alert_code, row)
+    }
+    row[series.key] = (row[series.key] ?? 0) + 1
+    row.total += 1
+    usedKeys.add(series.key)
+  }
+
+  const series = [...new Map([...seriesByNode.values()].map((s) => [s.key, s])).values()].filter(
+    (s) => usedKeys.has(s.key),
+  )
+  const rows = [...byCode.values()]
+    .map((row) => ({ ...Object.fromEntries(series.map((s) => [s.key, 0])), ...row }))
+    .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label))
+  return { rows, series }
+}
+
 // The last 24 hours of average temperature for each node, for the sparklines on the node cards.
 // `rows` are hourly report_sensor_chart rows covering at least the 24 hours before `now` (either
 // chart range does), so no extra query is needed. Returns a Map of node id to 24 values, oldest
