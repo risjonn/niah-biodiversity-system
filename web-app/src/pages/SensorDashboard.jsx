@@ -23,6 +23,9 @@ import {
   TableHead,
   TableRow,
   Tabs,
+  ToggleButton,
+  ToggleButtonGroup,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import { alpha, keyframes } from '@mui/material/styles'
@@ -34,7 +37,6 @@ import Battery4BarIcon from '@mui/icons-material/Battery4Bar'
 import Battery5BarIcon from '@mui/icons-material/Battery5Bar'
 import Battery6BarIcon from '@mui/icons-material/Battery6Bar'
 import BatteryFullIcon from '@mui/icons-material/BatteryFull'
-import BatteryUnknownIcon from '@mui/icons-material/BatteryUnknown'
 import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import EmptyState from '../components/EmptyState'
@@ -47,13 +49,24 @@ import { useToast } from '../context/ToastContext'
 import SensorCharts from '../components/SensorCharts'
 import { useSensors } from '../hooks/useSensors'
 import {
+  alertIcon,
+  alertLabel,
+  alertMeaning,
+  alertPosition,
   alertReadingText,
-  alertTypeIcons,
-  alertTypeLabels,
-  DefaultAlertIcon,
+  alertSources,
+  deviceAlertCodes,
+  deviceCodeLabel,
+  deviceStateColors,
   severityColors,
   severityLabels,
 } from '../lib/alerts'
+import {
+  distanceFromInstalled,
+  formatDistance,
+  formatPosition,
+  MOVED_DISTANCE_M,
+} from '../lib/geo'
 import { hoverLiftSx } from '../lib/hoverLift'
 import { mapUrl } from '../lib/mapUrl'
 // The battery levels are the battery chart's: below 40 % getting low, below 20 % low
@@ -63,11 +76,14 @@ import { chartTokens } from '../theme/theme'
 
 // How often nodes and alerts reload while the page is open and the browser tab is visible
 const REFRESH_INTERVAL_MS = 15 * 1000
-// A node the server hasn't heard from for this long is shown as offline
-const OFFLINE_AFTER_MS = 15 * 60 * 1000
+// A node the server hasn't heard from for this long is shown as offline. The gateway sends a
+// reading from each node every minute, so this is several missed readings in a row.
+const OFFLINE_AFTER_MS = 5 * 60 * 1000
 
 // The readings table's headings, shared with its loading skeleton
 const READING_COLUMNS = ['Recorded', 'Temperature', 'Humidity', 'Motion']
+// The GPS positions table's headings, in the readings dialog
+const POSITION_COLUMNS = ['Recorded', 'Position', 'From installed', 'Device state', 'Map']
 
 const nodeStatusLabels = { online: 'Online', offline: 'Offline', inactive: 'Inactive' }
 
@@ -309,6 +325,8 @@ function AlertsSection({ openAlerts, acknowledgedAlerts, now, onChanged }) {
   const toast = useToast()
   // 'all' lists the open alerts first, then the acknowledged ones
   const [tab, setTab] = useState('all')
+  // Which alerts to list: a key of alertSources (all, device or environment)
+  const [source, setSource] = useState('all')
   // Ids of alerts being acknowledged, so each button is disabled until its alert leaves the list
   const [savingIds, setSavingIds] = useState(() => new Set())
   const [error, setError] = useState(null)
@@ -330,22 +348,50 @@ function AlertsSection({ openAlerts, acknowledgedAlerts, now, onChanged }) {
     })
   }
 
+  // The tabs and the Open count follow the filter, so the count always matches the list
+  const matchesSource = alertSources[source].matches
+  const shownOpen = openAlerts.filter(matchesSource)
+  const shownAcknowledged = acknowledgedAlerts.filter(matchesSource)
   const alertsByTab = {
-    all: [...openAlerts, ...acknowledgedAlerts],
-    open: openAlerts,
-    acknowledged: acknowledgedAlerts,
+    all: [...shownOpen, ...shownAcknowledged],
+    open: shownOpen,
+    acknowledged: shownAcknowledged,
   }
+  // e.g. "No open device alerts"
+  const kind = source === 'all' ? '' : `${alertSources[source].label.toLowerCase()} `
   const emptyMessages = {
-    all: 'No alerts yet',
-    open: 'No open alerts',
-    acknowledged: 'No acknowledged alerts yet',
+    all: `No ${kind}alerts yet`,
+    open: `No open ${kind}alerts`,
+    acknowledged: `No acknowledged ${kind}alerts yet`,
   }
   const alerts = alertsByTab[tab]
 
   return (
     <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
       <Stack spacing={2}>
-        <Typography variant="h2">Alerts</Typography>
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={2}
+          sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'center' } }}
+        >
+          <Typography variant="h2">Alerts</Typography>
+          <ToggleButtonGroup
+            exclusive
+            size="small"
+            value={source}
+            // Clicking the selected option gives null; keep the current filter instead
+            onChange={(_event, value) => {
+              if (value) setSource(value)
+            }}
+            aria-label="Alert source"
+          >
+            {Object.entries(alertSources).map(([value, { label }]) => (
+              <ToggleButton key={value} value={value} sx={{ textTransform: 'none' }}>
+                {label}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+        </Stack>
         <Tabs
           value={tab}
           onChange={(_event, value) => setTab(value)}
@@ -353,7 +399,7 @@ function AlertsSection({ openAlerts, acknowledgedAlerts, now, onChanged }) {
           sx={{ borderBottom: 1, borderColor: 'divider' }}
         >
           <Tab value="all" label="All" />
-          <Tab value="open" label={`Open (${openAlerts.length})`} />
+          <Tab value="open" label={`Open (${shownOpen.length})`} />
           <Tab value="acknowledged" label="Acknowledged" />
         </Tabs>
 
@@ -385,13 +431,16 @@ function AlertsSection({ openAlerts, acknowledgedAlerts, now, onChanged }) {
   )
 }
 
-// One alert on the timeline: its type's icon on the line, then a card with the severity colour
-// down its left edge. The severity is also written in a chip, so it never relies on colour alone.
+// One alert on the timeline: its icon on the line, then a card with the severity colour down its
+// left edge. The severity is also written in a chip, so it never relies on colour alone. A device
+// alert is named by its code ("Critical fall") with the code's meaning below; a moved or
+// GPS-jammed box also gets a link to where the reading put it.
 function AlertItem({ alert, now, isLast, currentUserId, isSaving, onAcknowledge }) {
   const nodeName = alert.sensor_nodes?.node_identifier ?? 'Unknown node'
   const color = severityColors[alert.severity] ?? 'primary'
-  const Icon = alertTypeIcons[alert.alert_type] ?? DefaultAlertIcon
   const reading = alertReadingText(alert)
+  const meaning = alertMeaning(alert)
+  const position = alertPosition(alert)
 
   return (
     <Box component="li" sx={{ display: 'flex', gap: { xs: 1.5, sm: 2 } }}>
@@ -410,7 +459,7 @@ function AlertItem({ alert, now, isLast, currentUserId, isSaving, onAcknowledge 
             color: theme.palette[color].dark,
           })}
         >
-          <Icon fontSize="small" />
+          {alertIcon(alert, { fontSize: 'small' })}
         </Box>
         {!isLast ? <Box sx={{ flexGrow: 1, width: 2, bgcolor: 'divider', my: 0.5 }} /> : null}
       </Stack>
@@ -439,7 +488,7 @@ function AlertItem({ alert, now, isLast, currentUserId, isSaving, onAcknowledge 
               sx={{ alignItems: 'center', flexWrap: 'wrap' }}
             >
               <Typography variant="h3" component="h3">
-                {alertTypeLabels[alert.alert_type] ?? alert.alert_type}
+                {alertLabel(alert)}
               </Typography>
               <Chip
                 size="small"
@@ -454,10 +503,22 @@ function AlertItem({ alert, now, isLast, currentUserId, isSaving, onAcknowledge 
               <Box component="span" sx={{ color: 'text.secondary' }}>
                 <RelativeTime value={alert.created_at} now={now} />
               </Box>
+              {position?.latitude != null ? (
+                <>
+                  {' · '}
+                  <Link
+                    href={mapUrl(position.latitude, position.longitude)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open in map
+                  </Link>
+                </>
+              ) : null}
             </Typography>
-            {alert.message ? (
+            {meaning ? (
               <Typography variant="body2" color="textSecondary">
-                {alert.message}
+                {meaning}
               </Typography>
             ) : null}
             {alert.is_acknowledged ? (
@@ -553,12 +614,28 @@ function NodesSection({ nodes, now, hourlyReadings }) {
   )
 }
 
-// One node: name and status, its plant, the latest readings with a 24 h temperature sparkline,
-// battery, when it last reported and where it is. Clicking anywhere on the card opens its latest
-// readings; the name is a real button, so that also works from the keyboard.
+// One node: name and status, its plant, the latest device state, a red banner if the box has been
+// moved, the latest readings with a 24 h temperature sparkline, battery, when it last reported and
+// where it is. Clicking anywhere on the card opens its latest readings; the name is a real button,
+// so that also works from the keyboard.
+//
+// The device fields (alert_status, tilts, soil moisture, rain, person seen and the GPS fix) come
+// from the latest reading on sensor_node_latest (020). Each one is left out when that reading
+// doesn't have it: the gateway only sends them once SEND_EXTRA_FIELDS is on, and the GPS fix only
+// when the box has one. Before 020 is applied the view has none of them, so none show.
 function NodeCard({ node, now, sparkline, sparklineColor, onSelect }) {
   const status = nodeStatus(node, now)
   const hasReading = Boolean(node.reading_id)
+  const movedBy = distanceFromInstalled(node, node.reading_latitude, node.reading_longitude)
+  const isMoved = movedBy != null && movedBy > MOVED_DISTANCE_M
+  // Only the ones the latest reading has
+  const deviceMetrics = [
+    { label: 'Box tilt', value: node.tilt_angle, format: (value) => `${formatNumber(value)}°` },
+    { label: 'Plant tilt', value: node.plant_tilt_angle, format: (value) => `${formatNumber(value)}°` },
+    { label: 'Soil moisture', value: node.soil_moisture, format: (value) => `${formatNumber(value)} %` },
+    { label: 'Rain', value: node.is_raining, format: yesNo },
+    { label: 'Person seen', value: node.human_detected, format: yesNo },
+  ].filter((metric) => metric.value != null)
 
   return (
     <Card
@@ -603,6 +680,29 @@ function NodeCard({ node, now, sparkline, sparklineColor, onSelect }) {
             <StatusIndicator status={status} />
           </Stack>
 
+          {node.alert_status ? <DeviceStateChip node={node} /> : null}
+
+          {isMoved ? (
+            <Alert
+              severity="error"
+              action={
+                <Link
+                  href={mapUrl(node.reading_latitude, node.reading_longitude)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  color="inherit"
+                  variant="body2"
+                  onClick={(event) => event.stopPropagation()}
+                  sx={{ fontWeight: 500, whiteSpace: 'nowrap', alignSelf: 'center' }}
+                >
+                  Open in map
+                </Link>
+              }
+            >
+              Moved {formatDistance(movedBy)} from its installed position
+            </Alert>
+          ) : null}
+
           <Stack direction="row" spacing={3} useFlexGap sx={{ flexWrap: 'wrap' }}>
             <Metric
               label="Temperature"
@@ -613,6 +713,9 @@ function NodeCard({ node, now, sparkline, sparklineColor, onSelect }) {
               value={hasReading ? formatMeasurement(node.humidity, '%') : '—'}
             />
             <Metric label="Motion" value={hasReading ? formatMotion(node) : '—'} />
+            {deviceMetrics.map((metric) => (
+              <Metric key={metric.label} label={metric.label} value={metric.format(metric.value)} />
+            ))}
           </Stack>
 
           {sparkline ? <Sparkline values={sparkline} color={sparklineColor} /> : null}
@@ -652,6 +755,42 @@ function NodeCard({ node, now, sparkline, sparklineColor, onSelect }) {
         </Stack>
       </CardContent>
     </Card>
+  )
+}
+
+// The latest reading's alert_status as a chip, e.g. "Critical fall", coloured by the code's
+// severity from device_alert_codes (on sensor_node_latest, 020). The code's meaning is the
+// chip's tooltip and is also read out by screen readers.
+function DeviceStateChip({ node }) {
+  const Icon = deviceAlertCodes[node.alert_status]?.icon ?? null
+  const label = deviceCodeLabel(node.alert_status)
+  const meaning = node.alert_status_description
+
+  return (
+    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+      <Typography variant="caption" color="textSecondary">
+        Device state
+      </Typography>
+      {/* An empty title shows no tooltip */}
+      <Tooltip title={meaning ?? ''}>
+        <Chip
+          size="small"
+          variant="outlined"
+          icon={Icon ? <Icon aria-hidden="true" /> : undefined}
+          label={
+            <>
+              {label}
+              {meaning ? (
+                <Box component="span" sx={visuallyHidden}>
+                  : {meaning}
+                </Box>
+              ) : null}
+            </>
+          }
+          color={deviceStateColors[node.alert_status_severity] ?? 'default'}
+        />
+      </Tooltip>
+    </Stack>
   )
 }
 
@@ -698,16 +837,10 @@ function Metric({ label, value }) {
 }
 
 // A battery icon filled in proportion to the level, in the battery chart's colours. The level is
-// written out next to it, so it never relies on colour alone.
+// written out next to it, so it never relies on colour alone. Nothing at all when the node has no
+// level: the gateway doesn't send one (docs/iot/gateway-contract.md, section 3).
 function BatteryIndicator({ percent }) {
-  if (percent == null) {
-    return (
-      <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', color: 'text.secondary' }}>
-        <BatteryUnknownIcon fontSize="small" aria-hidden="true" />
-        <Typography variant="body2">No battery level</Typography>
-      </Stack>
-    )
-  }
+  if (percent == null) return null
 
   const value = Number(percent)
   const level = batteryLevel(value)
@@ -808,23 +941,32 @@ function Sparkline({ values, color }) {
   )
 }
 
-// The node's latest readings, loaded when the dialog opens. Keyed by node, so each node starts
-// with a fresh load.
+// The node's latest readings and its latest GPS positions, loaded when the dialog opens. Keyed by
+// node, so each node starts with a fresh load.
 function ReadingsDialog({ node, onClose }) {
-  const { getRecentReadings } = useSensors()
+  const { getRecentReadings, getRecentPositions } = useSensors()
   const [attempt, setAttempt] = useState(0)
   // Kept with the attempt it was loaded for, so Retry shows loading again (as in SpeciesDetail)
   const [result, setResult] = useState(null)
 
   useEffect(() => {
     let cancelled = false
-    getRecentReadings(node.id).then((nextResult) => {
-      if (!cancelled) setResult({ attempt, loadedAt: Date.now(), ...nextResult })
-    })
+    Promise.all([getRecentReadings(node.id), getRecentPositions(node.id)]).then(
+      ([readings, positions]) => {
+        if (cancelled) return
+        setResult({
+          attempt,
+          loadedAt: Date.now(),
+          data: readings.data,
+          positions: positions.data,
+          error: readings.error ?? positions.error,
+        })
+      },
+    )
     return () => {
       cancelled = true
     }
-  }, [getRecentReadings, node.id, attempt])
+  }, [getRecentReadings, getRecentPositions, node.id, attempt])
 
   const isLoading = result?.attempt !== attempt
 
@@ -882,11 +1024,73 @@ function ReadingsDialog({ node, onClose }) {
             </Table>
           </TableContainer>
         ) : null}
+
+        {!isLoading && !result.error && result.positions.length > 0 ? (
+          <PositionsTable node={node} positions={result.positions} loadedAt={result.loadedAt} />
+        ) : null}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Close</Button>
       </DialogActions>
     </Dialog>
+  )
+}
+
+// The node's latest GPS fixes (from getRecentPositions), each with its time, how far it is from
+// where the node was installed, and a link to it on a map. A fix more than MOVED_DISTANCE_M away
+// is marked "Moved" in words as well as in red. Shown only for a node that has sent a fix.
+function PositionsTable({ node, positions, loadedAt }) {
+  return (
+    <Stack spacing={1} sx={{ mt: 3 }}>
+      <Typography variant="h3" component="h3">
+        Recent GPS positions
+      </Typography>
+      <Typography variant="body2" color="textSecondary">
+        Installed at {formatPosition(node.latitude, node.longitude)}. A box more than{' '}
+        {MOVED_DISTANCE_M} m away has been moved.
+      </Typography>
+      <TableContainer component={Paper} variant="outlined">
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              {POSITION_COLUMNS.map((column) => (
+                <TableCell key={column}>{column}</TableCell>
+              ))}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {positions.map((position) => {
+              const distance = distanceFromInstalled(node, position.latitude, position.longitude)
+              const isMoved = distance != null && distance > MOVED_DISTANCE_M
+              return (
+                <TableRow key={position.id} sx={{ '& td': { whiteSpace: 'nowrap' } }}>
+                  <TableCell>
+                    <RelativeTime value={position.recorded_at} now={loadedAt} />
+                  </TableCell>
+                  <TableCell>{formatPosition(position.latitude, position.longitude)}</TableCell>
+                  <TableCell sx={isMoved ? { color: 'error.main', fontWeight: 500 } : null}>
+                    {distance != null ? formatDistance(distance) : '—'}
+                    {isMoved ? ' · Moved' : ''}
+                  </TableCell>
+                  <TableCell>
+                    {position.alert_status ? deviceCodeLabel(position.alert_status) : '—'}
+                  </TableCell>
+                  <TableCell>
+                    <Link
+                      href={mapUrl(position.latitude, position.longitude)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Open in map
+                    </Link>
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Stack>
   )
 }
 
@@ -964,6 +1168,10 @@ function formatNumber(value, maximumFractionDigits = 1) {
 // Temperature and humidity can be missing from a reading
 function formatMeasurement(value, unit) {
   return value != null ? `${formatNumber(value)} ${unit}` : '—'
+}
+
+function yesNo(value) {
+  return value ? 'Yes' : 'No'
 }
 
 function formatMotion({ motion_detected: detected, motion_duration_seconds: duration }) {
