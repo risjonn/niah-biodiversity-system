@@ -3,7 +3,7 @@
 | File | What it is |
 |---|---|
 | `001_sample_species.sql` | The 5 species. Safe to run again (updates them in place). |
-| `002_sample_sensor_nodes.sql` | NIAH-NODE-01 and NIAH-NODE-02, for development. Not needed for the demo. |
+| `002_sample_sensor_nodes.sql` | NODE-01 and NODE-02, for development. Not needed for the demo. |
 | `003_sample_plants.sql` | 12 `[seed]` test plants, for development. **Don't run it on the demo database.** |
 | `010_demo_reset.sql` | **Destructive.** Replaces every plant record with the demo data and deletes every plant photo row, sensor reading and alert. |
 | `012_align_alert_times.sql` | After the simulator backfill: moves each alert to the time of its reading. |
@@ -30,7 +30,9 @@ one before.
   select node_identifier, battery_level, is_active from sensor_nodes order by node_identifier;
   ```
 
-  Both nodes must have `is_active = true`, or the backfill gets 409 for them.
+  Both nodes must have `is_active = true`, or the backfill gets 409 for them. They must be called
+  `NODE-01` and `NODE-02`: migration 018 renames the old `NIAH-NODE-01` and `NIAH-NODE-02`, and
+  the reset refuses to run until it has.
 
 ### 1. CSV backups
 
@@ -67,7 +69,7 @@ It changes nothing and shows an error instead if:
 
 - it has already been run (the demo records are already there), so it can't be run twice;
 - another table has a foreign key to `plants`;
-- there are sensor nodes other than NIAH-NODE-01 and NIAH-NODE-02;
+- there are sensor nodes other than NODE-01 and NODE-02;
 - an account, a species or one of the two nodes is missing.
 
 ### 3. Empty the `plant-photos` bucket
@@ -83,7 +85,7 @@ From `iot-firmware/simulator` (setup in its README: Node 24, `.env` with `INGEST
 `DEVICE_INGEST_KEY`), with the battery levels from step 0:
 
 ```
-node simulate.js --backfill 14d NIAH-NODE-01 NIAH-NODE-02 --every 30m --with-events --battery NIAH-NODE-01=<level> --battery NIAH-NODE-02=<level>
+node simulate.js --backfill 14d NODE-01 NODE-02 --every 30m --with-events --battery NODE-01=<level> --battery NODE-02=<level>
 ```
 
 About 673 readings per node, a few minutes. The summary should say 673 saved and
@@ -128,8 +130,8 @@ Use your own photos, or ones whose licence allows it, of the right species. JPEG
 |---|---|---|---|
 | Approved | 2026-08-11 | *Nepenthes rafflesiana* (Pangkalan Batu) | Guest view |
 | Approved | 2026-09-17 | *Nepenthes bicalcarata* (peat swamp) | Guest view |
-| Approved, monitored | 2026-09-03 | *Gonystylus bancanus* (NIAH-NODE-01) | Staff see the photo, guests don't (017) |
-| Approved, monitored | 2026-09-10 | *Eusideroxylon zwageri* (NIAH-NODE-02) | Staff see the photo, guests don't (017) |
+| Approved, monitored | 2026-09-03 | *Gonystylus bancanus* (NODE-01) | Staff see the photo, guests don't (017) |
+| Approved, monitored | 2026-09-10 | *Eusideroxylon zwageri* (NODE-02) | Staff see the photo, guests don't (017) |
 | Rejected, "Photo unclear" | 2026-10-07 | *Nepenthes bicalcarata* | A deliberately blurry photo, so the reason makes sense |
 | Rejected, "Photo unclear" | 2026-11-06 | *Nepenthes ampullaria* | A deliberately blurry photo, so the reason makes sense |
 | Pending | 2026-11-17 | *Gonystylus bancanus* | Review demo (notes mention a cut stump) |
@@ -170,10 +172,10 @@ The CSVs from step 1 can be imported with the Table Editor. The demo plants have
 sensor nodes point at two of them and `sensor_nodes.plant_id` can't be empty, so the nodes are
 moved back to their old plants before the demo plants are deleted.
 
-**Three insert triggers have to be off during the import.** Otherwise every plant gets a **new**
+**Four insert triggers have to be off during the import.** Otherwise every plant gets a **new**
 QR code (003 generates one on every insert, so printed tags would stop matching), photos are
-attached twice (017), and every out-of-range reading raises its alert again on top of the
-imported alerts (009).
+attached twice (017), and every out-of-range reading (009) or WARNING/CRITICAL device reading
+(018) raises its alert again on top of the imported alerts.
 
 1. In the SQL Editor:
 
@@ -186,14 +188,15 @@ imported alerts (009).
    alter table plants disable trigger trg_generate_plant_qr_code;
    alter table plants disable trigger trg_add_plant_cover_from_photo_url;
    alter table sensor_readings disable trigger trg_check_reading_thresholds;
+   alter table sensor_readings disable trigger trg_create_device_alert;
    ```
 
 2. Import, in this order: `plants`, `plant_photos`, `sensor_readings`, `alerts`.
 3. Move each node back to the plant it had, using `plant_id` from `sensor_nodes.csv`:
 
    ```sql
-   update sensor_nodes set plant_id = '<plant_id from the CSV>' where node_identifier = 'NIAH-NODE-01';
-   update sensor_nodes set plant_id = '<plant_id from the CSV>' where node_identifier = 'NIAH-NODE-02';
+   update sensor_nodes set plant_id = '<plant_id from the CSV>' where node_identifier = 'NODE-01';
+   update sensor_nodes set plant_id = '<plant_id from the CSV>' where node_identifier = 'NODE-02';
    ```
 
 4. Delete the demo plants and turn the triggers back on:
@@ -204,6 +207,7 @@ imported alerts (009).
    alter table plants enable trigger trg_generate_plant_qr_code;
    alter table plants enable trigger trg_add_plant_cover_from_photo_url;
    alter table sensor_readings enable trigger trg_check_reading_thresholds;
+   alter table sensor_readings enable trigger trg_create_device_alert;
    ```
 
 Photo files have to be uploaded again to the same paths. The demo names stay on the three

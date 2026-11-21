@@ -1,4 +1,5 @@
 import DirectionsRunOutlinedIcon from '@mui/icons-material/DirectionsRunOutlined'
+import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined'
 import SensorsOutlinedIcon from '@mui/icons-material/SensorsOutlined'
 import ThermostatOutlinedIcon from '@mui/icons-material/ThermostatOutlined'
 import WaterDropOutlinedIcon from '@mui/icons-material/WaterDropOutlined'
@@ -6,13 +7,15 @@ import WifiOffOutlinedIcon from '@mui/icons-material/WifiOffOutlined'
 
 // Shared by the sensors page and the dashboard's latest alerts
 
-// Matches the alert_type enum in database/schema/001_initial_schema.sql. Nothing raises
+// Matches the alert_type enum in database/schema/001_initial_schema.sql, plus device_alert from
+// 018 (raised by the Forest Node itself; alerts.alert_code says which code). Nothing raises
 // node_offline yet; offline status is worked out on the sensors page from last_received_at.
 export const alertTypeLabels = {
   motion_detected: 'Motion detected',
   temperature_anomaly: 'Temperature out of range',
   humidity_anomaly: 'Humidity out of range',
   node_offline: 'Node offline',
+  device_alert: 'Device alert',
 }
 
 // An icon for each alert type. Look one up with a fallback to DefaultAlertIcon, for a type added
@@ -22,6 +25,7 @@ export const alertTypeIcons = {
   humidity_anomaly: WaterDropOutlinedIcon,
   motion_detected: DirectionsRunOutlinedIcon,
   node_offline: WifiOffOutlinedIcon,
+  device_alert: ReportProblemOutlinedIcon,
 }
 export const DefaultAlertIcon = SensorsOutlinedIcon
 
