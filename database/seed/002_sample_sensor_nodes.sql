@@ -1,4 +1,4 @@
--- Two sample sensor nodes, NIAH-NODE-01 and NIAH-NODE-02, for testing the ingest-reading
+-- Two sample sensor nodes, NODE-01 and NODE-02, for testing the ingest-reading
 -- function and the simulator. Each goes on a different approved plant that has no node yet,
 -- oldest record first, using that plant's coordinates.
 --
@@ -7,7 +7,7 @@
 
 with missing_nodes as (
   select node_identifier, row_number() over (order by node_identifier) as n
-  from (values ('NIAH-NODE-01'), ('NIAH-NODE-02')) as wanted(node_identifier)
+  from (values ('NODE-01'), ('NODE-02')) as wanted(node_identifier)
   where not exists (
     select 1 from sensor_nodes sn where sn.node_identifier = wanted.node_identifier
   )
@@ -29,7 +29,7 @@ set is_monitored = true
 where not is_monitored
   and id in (
     select plant_id from sensor_nodes
-    where node_identifier in ('NIAH-NODE-01', 'NIAH-NODE-02')
+    where node_identifier in ('NODE-01', 'NODE-02')
   );
 
 do $$
@@ -38,11 +38,11 @@ declare
 begin
   select count(*) into node_count
   from sensor_nodes
-  where node_identifier in ('NIAH-NODE-01', 'NIAH-NODE-02');
+  where node_identifier in ('NODE-01', 'NODE-02');
 
   if node_count < 2 then
     raise notice 'Only % of 2 sample sensor nodes exist. Approve more plants and run this file again.', node_count;
   else
-    raise notice 'Sample sensor nodes NIAH-NODE-01 and NIAH-NODE-02 are ready.';
+    raise notice 'Sample sensor nodes NODE-01 and NODE-02 are ready.';
   end if;
 end $$;

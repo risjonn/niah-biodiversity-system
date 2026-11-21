@@ -2,18 +2,21 @@
 // LoRa gateway. Node 24, no packages. See README.md for setup and the JSON format.
 //
 // Usage: node simulate.js <node_identifier> [scenario] [--interval s] [--count n] [--battery level]
+//                         [--extra] [--start lat,lng]
 //        node simulate.js --backfill <duration> <node_identifier>... [--every <duration>]
-//                         [--with-events] [--battery level]
+//                         [--with-events] [--battery level] [--extra]
 
 const fs = require('node:fs');
 const path = require('node:path');
 
 const USAGE =
-  'Usage: node simulate.js <node_identifier> [scenario] [--interval s] [--count n] [--battery level]\n' +
-  '       node simulate.js --backfill <duration> <node_identifier>... [--every <duration>] [--with-events] [--battery level]\n' +
-  'Scenarios: normal, hot, dry, motion, brief-motion\n' +
+  'Usage: node simulate.js <node_identifier> [scenario] [--interval s] [--count n] [--battery level] [--extra] [--start lat,lng]\n' +
+  '       node simulate.js --backfill <duration> <node_identifier>... [--every <duration>] [--with-events] [--battery level] [--extra]\n' +
+  'Threshold scenarios: normal, hot, dry, motion, brief-motion (add --extra to also send the node fields)\n' +
+  'Device scenarios: impact, poaching, night-poaching, critical-fall, stolen, tamper (always send the node fields)\n' +
+  'stolen needs --start lat,lng, the node\'s position; it sends 6 packets unless --count is given\n' +
   'Durations: a whole number with m, h or d, e.g. 15m, 12h, 7d\n' +
-  'Battery: a percentage for every node (--battery 92) or for one node (--battery NIAH-NODE-01=92),\n' +
+  'Battery: a percentage for every node (--battery 92) or for one node (--battery NODE-01=92),\n' +
   '         repeat it for each node';
 
 // Backfill limits. Past 30 days the readings would be older than anything the dashboard shows.
@@ -37,14 +40,141 @@ function randomBetween(min, max) {
   return min + Math.random() * (max - min);
 }
 
+// ---------- node fields (docs/iot/gateway-contract.md) ----------
+// The fields the gateway adds once SEND_EXTRA_FIELDS is on. Values from docs/iot/node-logic-guide.md:
+// a calibrated, upright box and plant read a few degrees of tilt; soil moisture is a percentage.
+
+// A settled node: small tilts, normal soil, now and then rain (wetter soil while it rains)
+function settledNodeFields() {
+  const raining = Math.random() < 0.15;
+  return {
+    tilt_angle: between(1, 4),
+    plant_tilt_angle: between(0.5, 3),
+    soil_moisture: raining ? between(65, 85) : between(40, 60),
+    is_raining: raining,
+    tamper_detected: false,
+    human_detected: false,
+  };
+}
+
+// Dry ground, no rain: the node only raises impact and poaching alerts while it is dry
+function dryNodeFields() {
+  return { ...settledNodeFields(), soil_moisture: between(40, 55), is_raining: false };
+}
+
+const METRES_PER_DEGREE_LATITUDE = 111320;
+
+// The point `metres` from `start` in the direction `bearing` (radians clockwise from north),
+// rounded to 6 decimal places (about 0.1 m), like the NEO-6M fix the gateway sends
+function offsetPosition(start, metres, bearing) {
+  const lat = start.lat + (metres * Math.cos(bearing)) / METRES_PER_DEGREE_LATITUDE;
+  const lng =
+    start.lng + (metres * Math.sin(bearing)) / (METRES_PER_DEGREE_LATITUDE * Math.cos((start.lat * Math.PI) / 180));
+  return { latitude: Math.round(lat * 1e6) / 1e6, longitude: Math.round(lng * 1e6) / 1e6 };
+}
+
+// Stolen: the node latches PLANT_STOLEN_MOVING once the box is more than 15 m from home, then sends
+// live GPS every 5 s. The first packet is 20 m out, and each one after it about 5 m further on.
+const STOLEN_FIRST_METRES = 20;
+const STOLEN_METRES_PER_PACKET = 5;
+const STOLEN_DEFAULT_COUNT = 6;
+
+// Each scenario's values(i, context), with i counting packets from 1. Threshold scenarios send only
+// the basic fields, plus the node fields with extraCode (the INFO code the node would give that
+// reading) when --extra is passed. Device scenarios always send the node fields and their code.
+//
 // Default thresholds (009): temperature 18 to 35 °C, humidity 50 to 100 %, motion window 10 s.
+// Readings with an alert_status never raise motion_detected (018: the node decides about motion),
+// so --extra on motion or brief-motion raises no alert, and the device scenarios raise only their
+// device alert whatever the motion duration.
 const SCENARIOS = {
-  normal: () => ({ temperature: between(24, 30), humidity: between(70, 90), motion_detected: false, motion_duration_seconds: 0 }),
-  hot: () => ({ temperature: between(37, 40), humidity: between(70, 90), motion_detected: false, motion_duration_seconds: 0 }),
-  dry: () => ({ temperature: between(24, 30), humidity: between(35, 45), motion_detected: false, motion_duration_seconds: 0 }),
-  motion: () => ({ temperature: between(24, 30), humidity: between(70, 90), motion_detected: true, motion_duration_seconds: between(15, 30) }),
-  'brief-motion': () => ({ temperature: between(24, 30), humidity: between(70, 90), motion_detected: true, motion_duration_seconds: between(2, 5) }),
+  normal: {
+    extraCode: 'NORMAL',
+    values: () => ({ temperature: between(24, 30), humidity: between(70, 90), motion_detected: false, motion_duration_seconds: 0 }),
+  },
+  hot: {
+    extraCode: 'NORMAL',
+    values: () => ({ temperature: between(37, 40), humidity: between(70, 90), motion_detected: false, motion_duration_seconds: 0 }),
+  },
+  dry: {
+    extraCode: 'NORMAL',
+    values: () => ({ temperature: between(24, 30), humidity: between(35, 45), motion_detected: false, motion_duration_seconds: 0 }),
+  },
+  motion: {
+    // Under the node's 120 s loitering limit, so still only MOTION_ONLY
+    extraCode: 'MOTION_ONLY',
+    values: () => ({ temperature: between(24, 30), humidity: between(70, 90), motion_detected: true, motion_duration_seconds: between(15, 30) }),
+  },
+  'brief-motion': {
+    extraCode: 'MOTION_ONLY',
+    values: () => ({ temperature: between(24, 30), humidity: between(70, 90), motion_detected: true, motion_duration_seconds: between(2, 5) }),
+  },
+
+  // 3 strong knocks within 10 s on the box or plant. Only raised while dry. Motion duration 0 as in
+  // the contract's example.
+  impact: {
+    device: true,
+    values: () => ({
+      temperature: between(24, 30), humidity: between(70, 90), motion_detected: true, motion_duration_seconds: 0,
+      ...dryNodeFields(), tilt_angle: between(2, 4), plant_tilt_angle: between(3, 8),
+      alert_status: 'IMPACT_DETECTED',
+    }),
+  },
+  // Daytime: the camera saw a person after motion and a plant tilt past the 12° day limit
+  poaching: {
+    device: true,
+    values: () => ({
+      temperature: between(26, 31), humidity: between(65, 80), motion_detected: true, motion_duration_seconds: between(5, 9),
+      ...dryNodeFields(), tilt_angle: between(3, 6), plant_tilt_angle: between(12.5, 20), human_detected: true,
+      alert_status: 'POACHING_RISK',
+    }),
+  },
+  // The same at night, when the plant limit is 6° and it counts as CRITICAL
+  'night-poaching': {
+    device: true,
+    values: () => ({
+      temperature: between(22, 24), humidity: between(90, 96), motion_detected: true, motion_duration_seconds: between(5, 9),
+      ...dryNodeFields(), tilt_angle: between(2, 5), plant_tilt_angle: between(6.5, 12), human_detected: true,
+      alert_status: 'NIGHT_POACHING_RISK',
+    }),
+  },
+  // Box tilted 75° or more, almost fallen
+  'critical-fall': {
+    device: true,
+    values: () => ({
+      temperature: between(24, 30), humidity: between(70, 90), motion_detected: true, motion_duration_seconds: between(1, 4),
+      ...settledNodeFields(), tilt_angle: between(76, 89), plant_tilt_angle: between(1, 5),
+      alert_status: 'CRITICAL_FALL',
+    }),
+  },
+  // Box carried away: tilted and moving, GPS further from home on every packet
+  stolen: {
+    device: true,
+    values: (i, { start, bearing }) => ({
+      temperature: between(24, 30), humidity: between(70, 90), motion_detected: true, motion_duration_seconds: between(3, 5),
+      ...settledNodeFields(), tilt_angle: between(20, 45), plant_tilt_angle: between(5, 20),
+      ...offsetPosition(start, STOLEN_FIRST_METRES + STOLEN_METRES_PER_PACKET * (i - 1) + between(-0.5, 0.5), bearing + between(-0.03, 0.03)),
+      alert_status: 'PLANT_STOLEN_MOVING',
+    }),
+  },
+  // Enclosure lid opened
+  tamper: {
+    device: true,
+    values: () => ({
+      temperature: between(24, 30), humidity: between(70, 90), motion_detected: true, motion_duration_seconds: between(2, 6),
+      ...settledNodeFields(), tilt_angle: between(2, 6), tamper_detected: true,
+      alert_status: 'TAMPER_LID_OPENED',
+    }),
+  },
 };
+
+// One live reading's fields for scenario, packet i
+function scenarioFields(scenario, i, context, extra) {
+  const { values, device, extraCode } = SCENARIOS[scenario];
+  const fields = values(i, context);
+  if (device || !extra) return fields;
+  return { ...fields, ...settledNodeFields(), alert_status: extraCode };
+}
 
 function fail(message) {
   console.error(`${message}\n\n${USAGE}`);
@@ -59,15 +189,26 @@ function parseDuration(text) {
   return Number(match[1]) * unitMs;
 }
 
-// '92' sets every node's starting level, 'NIAH-NODE-01=92' one node's
+// '92' sets every node's starting level, 'NODE-01=92' one node's
 function parseBattery(text, battery) {
   const match = /^(?:(.+)=)?(\d+(?:\.\d+)?)$/.exec(text ?? '');
   const level = match ? Number(match[2]) : NaN;
   if (!(level >= 0 && level <= 100)) {
-    fail('--battery must be a percentage from 0 to 100, or <node_identifier>=<percent>, e.g. --battery NIAH-NODE-01=92');
+    fail('--battery must be a percentage from 0 to 100, or <node_identifier>=<percent>, e.g. --battery NODE-01=92');
   }
   if (match[1]) battery.byNode.set(match[1], level);
   else battery.all = level;
+}
+
+// '3.8256,113.7645' as { lat, lng }
+function parseStart(text) {
+  const match = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/.exec(text ?? '');
+  const lat = match ? Number(match[1]) : NaN;
+  const lng = match ? Number(match[2]) : NaN;
+  if (!(lat >= -89 && lat <= 89 && lng >= -180 && lng <= 180)) {
+    fail('--start must be <latitude>,<longitude> with no space, e.g. --start 3.8256,113.7645');
+  }
+  return { lat, lng };
 }
 
 function parseArgs(argv) {
@@ -77,6 +218,8 @@ function parseArgs(argv) {
   let backfill = null;
   let every = null;
   let withEvents = false;
+  let extra = false;
+  let start = null;
   const battery = { all: null, byNode: new Map() };
   const seen = new Set();
 
@@ -106,6 +249,10 @@ function parseArgs(argv) {
       parseBattery(argv[++i], battery);
     } else if (arg === '--with-events') {
       withEvents = true;
+    } else if (arg === '--extra') {
+      extra = true;
+    } else if (arg === '--start') {
+      start = parseStart(argv[++i]);
     } else if (arg.startsWith('--')) {
       fail(`Unknown option ${arg}`);
     } else {
@@ -119,23 +266,32 @@ function parseArgs(argv) {
       fail('--interval and --count are not used with --backfill; use --every for the gap between readings');
     }
     if (positional.length === 0) fail('Missing node_identifier');
-    const scenario = positional.find((arg) => SCENARIOS[arg]);
+    const scenario = positional.find((arg) => Object.hasOwn(SCENARIOS, arg));
     if (scenario) fail(`Scenarios are not used with --backfill (got ${scenario}); use --with-events for out-of-range readings`);
+    if (start) fail('--start is only used with the stolen scenario');
     const step = every ?? { text: DEFAULT_STEP, ms: parseDuration(DEFAULT_STEP) };
     if (step.ms >= backfill.ms) fail('--every must be shorter than --backfill');
     if (withEvents && Math.floor(backfill.ms / step.ms) + 1 < MIN_EVENT_READINGS) {
       fail(`--with-events needs at least ${MIN_EVENT_READINGS} readings per node; use a longer --backfill or a shorter --every`);
     }
-    options = { mode: 'backfill', nodeIdentifiers: [...new Set(positional)], backfill, step, withEvents, battery };
+    options = { mode: 'backfill', nodeIdentifiers: [...new Set(positional)], backfill, step, withEvents, extra, battery };
   } else {
     if (every) fail('--every is only used with --backfill');
-    if (withEvents) fail('--with-events is only used with --backfill; for one live alert use the hot, dry or motion scenario');
+    if (withEvents) fail('--with-events is only used with --backfill; for one live alert use a scenario such as hot or impact');
 
-    const [nodeIdentifier, scenario = 'normal', ...extra] = positional;
+    const [nodeIdentifier, scenario = 'normal', ...unexpected] = positional;
     if (!nodeIdentifier) fail('Missing node_identifier');
-    if (extra.length > 0) fail(`Unexpected argument ${extra[0]}`);
-    if (!SCENARIOS[scenario]) fail(`Unknown scenario ${scenario}`);
-    options = { mode: 'live', nodeIdentifiers: [nodeIdentifier], scenario, interval, count, battery };
+    if (unexpected.length > 0) fail(`Unexpected argument ${unexpected[0]}`);
+    if (!Object.hasOwn(SCENARIOS, scenario)) fail(`Unknown scenario ${scenario}`);
+    if (scenario === 'stolen') {
+      // The track starts from where the node is installed, which the simulator can't look up (the
+      // device key can't read sensor_nodes)
+      if (!start) fail('stolen needs --start <latitude>,<longitude>, the node\'s position on the Sensors page');
+      if (!seen.has('--count')) count = STOLEN_DEFAULT_COUNT;
+    } else if (start) {
+      fail('--start is only used with the stolen scenario');
+    }
+    options = { mode: 'live', nodeIdentifiers: [nodeIdentifier], scenario, interval, count, extra, start, battery };
   }
 
   for (const node of battery.byNode.keys()) {
@@ -330,7 +486,7 @@ function planEvents(times, nodeIndex) {
   return { byIndex, placed };
 }
 
-function backfillReading(nodeIdentifier, time, startTime, profile, event) {
+function backfillReading(nodeIdentifier, time, startTime, profile, event, extra) {
   const sarawakHours = time / HOUR_MS + SARAWAK_OFFSET_HOURS;
   const hourOfDay = ((sarawakHours % 24) + 24) % 24;
   const day = Math.floor(sarawakHours / 24);
@@ -349,7 +505,10 @@ function backfillReading(nodeIdentifier, time, startTime, profile, event) {
     // Shorter than the default 10 s motion window, so no motion alerts either
     motion_duration_seconds: motion ? between(1, 8) : 0,
   };
-  return event ? { ...reading, ...event.values() } : reading;
+  const withEvent = event ? { ...reading, ...event.values() } : reading;
+  if (!extra) return withEvent;
+  // --extra: the node fields too, with the INFO code the node would give (never an alert)
+  return { ...withEvent, ...settledNodeFields(), alert_status: withEvent.motion_detected ? 'MOTION_ONLY' : 'NORMAL' };
 }
 
 // Evenly spaced times from `durationMs` ago up to now, each nudged by up to a quarter of the gap
@@ -385,7 +544,7 @@ async function postReading(url, deviceKey, reading) {
 // One node's readings in time order, so the node's battery level ends on the newest one. Stops
 // at the first 4xx answer: it would be the same for every reading (wrong key, unknown or inactive
 // node, invalid reading).
-async function backfillNode(nodeIdentifier, nodeIndex, times, { url, deviceKey }, batteries, withEvents) {
+async function backfillNode(nodeIdentifier, nodeIndex, times, { url, deviceKey }, batteries, withEvents, extra) {
   const profile = nodeProfile();
   const startLevel = batteries.start(nodeIdentifier);
   const events = withEvents ? planEvents(times, nodeIndex) : null;
@@ -395,7 +554,7 @@ async function backfillNode(nodeIdentifier, nodeIndex, times, { url, deviceKey }
   if (events) console.log(`${nodeIdentifier} events: ${events.placed.join(', ')}`);
 
   for (let i = 0; i < times.length; i++) {
-    const reading = backfillReading(nodeIdentifier, times[i], times[0], profile, events?.byIndex.get(i));
+    const reading = backfillReading(nodeIdentifier, times[i], times[0], profile, events?.byIndex.get(i), extra);
     // Drains with time from the starting level, never below 0
     const level =
       startLevel === null ? null : Math.max(0, startLevel - (profile.batteryDrainPerDay * (times[i] - times[0])) / DAY_MS);
@@ -430,7 +589,7 @@ async function backfillNode(nodeIdentifier, nodeIndex, times, { url, deviceKey }
   return summary;
 }
 
-async function runBackfill({ nodeIdentifiers, backfill, step, withEvents, battery }, env) {
+async function runBackfill({ nodeIdentifiers, backfill, step, withEvents, extra, battery }, env) {
   const batteries = createBatteries(nodeIdentifiers, battery);
   const now = Date.now();
   const timesByNode = nodeIdentifiers.map(() => backfillTimes(backfill.ms, step.ms, now));
@@ -445,24 +604,28 @@ async function runBackfill({ nodeIdentifiers, backfill, step, withEvents, batter
   // Nodes run side by side; each node's readings go one at a time
   const summaries = await Promise.all(
     nodeIdentifiers.map((nodeIdentifier, index) =>
-      backfillNode(nodeIdentifier, index, timesByNode[index], env, batteries, withEvents),
+      backfillNode(nodeIdentifier, index, timesByNode[index], env, batteries, withEvents, extra),
     ),
   );
+
+  // With --extra every reading has an alert_status, and the database then leaves motion to the
+  // node (018): the long motion event is sent as MOTION_ONLY and raises nothing
+  const alertingEvents = EVENTS.filter((e) => !(extra && e.alertType === 'motion_detected'));
 
   console.log('');
   for (const s of summaries) {
     const stopped = s.stoppedBy ? `, stopped by ${s.stoppedBy}` : '';
-    const expected = s.events ? ` (${EVENTS.length} expected from the events)` : '';
+    const expected = s.events ? ` (${alertingEvents.length} expected from the events)` : '';
     const batteryText =
       s.startLevel === null
         ? ', battery not sent'
         : `, battery ${round1(s.startLevel)} % -> ${s.endLevel === null ? 'unchanged' : `${round1(s.endLevel)} %`}`;
     console.log(`${s.nodeIdentifier}: ${s.saved} saved, ${s.failed} not saved, ${s.alerts} alert(s) raised${expected}${batteryText}${stopped}`);
     if (s.failed > 0) process.exitCode = 1;
-    if (s.events && !s.stoppedBy && s.alerts < EVENTS.length) {
+    if (s.events && !s.stoppedBy && s.alerts < alertingEvents.length) {
       console.log(
         `  Fewer alerts than events: the node may have its own limits in alert_thresholds, or an ` +
-          `unacknowledged alert of the same type was already open (${EVENTS.map((e) => e.alertType).join(', ')}).`,
+          `unacknowledged alert of the same type was already open (${alertingEvents.map((e) => e.alertType).join(', ')}).`,
       );
     }
   }
@@ -470,18 +633,27 @@ async function runBackfill({ nodeIdentifiers, backfill, step, withEvents, batter
 
 // ---------- live ----------
 
-async function runLive({ nodeIdentifiers, scenario, interval, count, battery }, { url, deviceKey }) {
+async function runLive({ nodeIdentifiers, scenario, interval, count, extra, start, battery }, { url, deviceKey }) {
   const [nodeIdentifier] = nodeIdentifiers;
   const batteries = createBatteries(nodeIdentifiers, battery);
   let level = batteries.start(nodeIdentifier);
+  // stolen: one direction for the whole run
+  const context = { start, bearing: Math.random() * 2 * Math.PI };
 
-  console.log(`Sending ${count} "${scenario}" reading(s) for ${nodeIdentifier} to ${url}\n`);
+  const withFields = SCENARIOS[scenario].device || extra ? ', with the node fields' : '';
+  console.log(`Sending ${count} "${scenario}" reading(s)${withFields} for ${nodeIdentifier} to ${url}\n`);
+  if (scenario === 'stolen') {
+    console.log(
+      `GPS track starts 20 m from ${start.lat}, ${start.lng}. Each fix is saved on its reading; ` +
+        `${nodeIdentifier}'s installed position doesn't change.\n`,
+    );
+  }
 
   for (let i = 1; i <= count; i++) {
     const reading = {
       node_identifier: nodeIdentifier,
       recorded_at: new Date().toISOString(),
-      ...SCENARIOS[scenario](),
+      ...scenarioFields(scenario, i, context, extra),
     };
     // A small drop per reading
     if (level !== null) {

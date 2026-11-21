@@ -14,7 +14,9 @@
 --
 --  It KEEPS: species, species_photos, sensor_nodes, alert_thresholds, profiles, auth users.
 --
---  Run in the Supabase SQL Editor, the whole file at once, after 001-017. Part of #19.
+--  Run in the Supabase SQL Editor, the whole file at once, after 001-018. Part of #19.
+--  018 renames the sensor nodes NIAH-NODE-01 and NIAH-NODE-02 to NODE-01 and NODE-02, the
+--  names the gateway sends and the names this file looks for.
 -- =====================================================================================
 --
 -- One transaction, no schema changes: if any check fails, nothing is changed. In order:
@@ -25,7 +27,7 @@
 --   3. Reviews 30 of them as the conservation officer: 24 approved, 6 rejected (reasons from the
 --      web quick-pick list), 10 left pending (the most recent ones, plus one late-October
 --      backlog record). Marks 2 approved plants as monitored.
---   4. Moves NIAH-NODE-01 and NIAH-NODE-02 to the two monitored plants. sensor_nodes.plant_id
+--   4. Moves NODE-01 and NODE-02 to the two monitored plants. sensor_nodes.plant_id
 --      stays NOT NULL throughout: the nodes are moved before the old plants are deleted.
 --   5. Deletes every alert, every sensor reading, and every plant not inserted by this run.
 --   6. Gives the three demo accounts realistic names.
@@ -36,17 +38,18 @@
 --     can't be run twice
 --   - refuses if any other table has a foreign key to plants (it could be a cascade that would
 --     delete more than intended, e.g. a table added outside this repo)
---   - refuses if there are sensor nodes other than NIAH-NODE-01 and NIAH-NODE-02: they would
+--   - refuses if a node still has its old name (NIAH-NODE-01 or NIAH-NODE-02): 018 isn't applied
+--   - refuses if there are sensor nodes other than NODE-01 and NODE-02: they would
 --     still point at old plants, which can't then be deleted
 --   - the three accounts exist with the right roles, the 5 species and both nodes exist
 --
--- What references plants (database/schema 001-017):
+-- What references plants (database/schema 001-018):
 --   - plant_photos.plant_id  -> on delete cascade, removed with the old plants
 --   - sensor_nodes.plant_id  -> no cascade, NOT NULL: moved to the new plants first
 --   Views and functions that read plants (plants_public, sensor_node_latest, plant_is_public,
 --   report_*) hold no rows and need nothing.
 --
--- How it respects the triggers and policies (001-017):
+-- How it respects the triggers and policies (001-018):
 --   - 003: plants are inserted as pending_review with no qr_code; trg_generate_plant_qr_code
 --     always generates it on the server.
 --   - 004/015: the review step runs with auth.uid() set to the officer (request.jwt.claims, the
@@ -134,7 +137,7 @@ insert into demo_plants (
    'Mature tree, DBH about 55 cm. Straight cylindrical bole without buttresses, bark grey-brown and shallowly fissured. On deep, waterlogged peat. No sign of cutting nearby.',
    3.8256, 113.7645, 'Peat swamp near Sungai Niah, west bank, 20 m off the old survey line',
    '2026-09-03 09:10+08', '8 hours 15 minutes', 'approved', null, '2026-09-05 15:05+08',
-   'NIAH-NODE-01', '2026-09-12 10:30+08'),
+   'NODE-01', '2026-09-12 10:30+08'),
   (7, 'Nepenthes ampullaria', 50,
    'Two rosettes with a carpet of lower pitchers around their bases. Pitchers deep red all over.',
    3.8139, 113.7741, 'Great Cave plankwalk, wet ground beside the boards about 1 km from Pangkalan Batu',
@@ -143,7 +146,7 @@ insert into demo_plants (
    'Large tree, DBH about 78 cm. Bark reddish-brown, flaking in small patches. Crown healthy, no sign of cutting nearby.',
    3.8088, 113.7821, 'Foot of the limestone, mixed forest below the Great Cave West Mouth',
    '2026-09-10 08:30+08', '9 hours', 'approved', null, '2026-09-14 10:00+08',
-   'NIAH-NODE-02', '2026-09-18 11:00+08'),
+   'NODE-02', '2026-09-18 11:00+08'),
   (9, 'Nepenthes rafflesiana', 90,
    'Rosette with lower pitchers only, about 12 cm tall, two fringed wings. Cream with dark red spots, ribbed red peristome.',
    3.8217, 113.7618, 'Park HQ forest edge, open sandy ground behind the visitor chalets',
@@ -312,12 +315,22 @@ begin
       problem;
   end if;
 
+  -- Before the next check, which would otherwise list the two real nodes as ones to delete
   select string_agg(node_identifier, ', ' order by node_identifier)
   into problem
   from sensor_nodes
-  where node_identifier not in ('NIAH-NODE-01', 'NIAH-NODE-02');
+  where node_identifier in ('NIAH-NODE-01', 'NIAH-NODE-02');
   if problem is not null then
-    raise exception 'Demo reset not run: the reset only moves NIAH-NODE-01 and NIAH-NODE-02, and these other nodes would still point at plants it deletes: %. Delete them first (their readings, alerts and own alert_thresholds row go with them).',
+    raise exception 'Demo reset not run: these sensor nodes still have their old names: %. Apply database/schema/018_device_alerts.sql first, which renames them to NODE-01 and NODE-02. Don''t delete them.',
+      problem;
+  end if;
+
+  select string_agg(node_identifier, ', ' order by node_identifier)
+  into problem
+  from sensor_nodes
+  where node_identifier not in ('NODE-01', 'NODE-02');
+  if problem is not null then
+    raise exception 'Demo reset not run: the reset only moves NODE-01 and NODE-02, and these other nodes would still point at plants it deletes: %. Delete them first (their readings, alerts and own alert_thresholds row go with them).',
       problem;
   end if;
 
@@ -353,7 +366,7 @@ begin
 
   select string_agg(w.node_identifier, ', ')
   into problem
-  from (values ('NIAH-NODE-01'), ('NIAH-NODE-02')) as w(node_identifier)
+  from (values ('NODE-01'), ('NODE-02')) as w(node_identifier)
   where not exists (select 1 from sensor_nodes sn where sn.node_identifier = w.node_identifier);
   if problem is not null then
     raise exception 'Demo reset not run: sensor node(s) % not found. Check the node identifiers in sensor_nodes.', problem;
@@ -443,9 +456,9 @@ begin
 
   if exists (
     select 1 from sensor_nodes
-    where node_identifier in ('NIAH-NODE-01', 'NIAH-NODE-02') and not is_active
+    where node_identifier in ('NODE-01', 'NODE-02') and not is_active
   ) then
-    raise notice 'NIAH-NODE-01 or NIAH-NODE-02 is marked inactive, so the simulator backfill will get 409 for it. Set is_active = true before the backfill.';
+    raise notice 'NODE-01 or NODE-02 is marked inactive, so the simulator backfill will get 409 for it. Set is_active = true before the backfill.';
   end if;
 
   -- ---------- delete the old data ----------
