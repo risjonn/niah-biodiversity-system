@@ -86,7 +86,9 @@ const ZERO_BAR_SIZE = 2
 // `onHourlyReadings` (optional, should be stable, e.g. a state setter) is called after each load
 // with { rows, now }: the hourly rows and the time the period ends, or null if they failed to
 // load. The page builds the node cards' sparklines from them, so they need no query of their own.
-export default function SensorCharts({ nodes, refreshKey, onHourlyReadings }) {
+// `onThresholds` (optional, should be stable) is called once the alert limits load, with
+// getAlertThresholds' { data, error }. The node cards' gauges shade each node's limits from it.
+export default function SensorCharts({ nodes, refreshKey, onHourlyReadings, onThresholds }) {
   const { getChartReadings, getAlertThresholds } = useSensors()
   const [range, setRange] = useState('24h')
   // Kept with the range and refresh it was loaded for, so a new range shows as loading rather
@@ -137,12 +139,14 @@ export default function SensorCharts({ nodes, refreshKey, onHourlyReadings }) {
   useEffect(() => {
     let cancelled = false
     getAlertThresholds().then((nextResult) => {
-      if (!cancelled) setThresholds(nextResult)
+      if (cancelled) return
+      setThresholds(nextResult)
+      onThresholds?.(nextResult)
     })
     return () => {
       cancelled = true
     }
-  }, [getAlertThresholds])
+  }, [getAlertThresholds, onThresholds])
 
   const current = result?.key === requestKey ? result : null
   const seriesByNode = useMemo(

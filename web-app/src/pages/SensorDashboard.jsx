@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Box,
@@ -27,6 +27,7 @@ import {
   ToggleButtonGroup,
   Tooltip,
   Typography,
+  useMediaQuery,
 } from '@mui/material'
 import { alpha, keyframes } from '@mui/material/styles'
 import Battery0BarIcon from '@mui/icons-material/Battery0Bar'
@@ -38,10 +39,24 @@ import Battery5BarIcon from '@mui/icons-material/Battery5Bar'
 import Battery6BarIcon from '@mui/icons-material/Battery6Bar'
 import BatteryFullIcon from '@mui/icons-material/BatteryFull'
 import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined'
+import DirectionsRunOutlinedIcon from '@mui/icons-material/DirectionsRunOutlined'
+import ErrorOutlineOutlinedIcon from '@mui/icons-material/ErrorOutlineOutlined'
+import ExpandLessIcon from '@mui/icons-material/ExpandLess'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined'
+import LocalFloristOutlinedIcon from '@mui/icons-material/LocalFloristOutlined'
+import NotificationsActiveOutlinedIcon from '@mui/icons-material/NotificationsActiveOutlined'
+import PersonOutlineOutlinedIcon from '@mui/icons-material/PersonOutlineOutlined'
 import RefreshIcon from '@mui/icons-material/Refresh'
+import SensorsOutlinedIcon from '@mui/icons-material/SensorsOutlined'
+import UmbrellaOutlinedIcon from '@mui/icons-material/UmbrellaOutlined'
+import WifiOffOutlinedIcon from '@mui/icons-material/WifiOffOutlined'
+import WifiOutlinedIcon from '@mui/icons-material/WifiOutlined'
 import EmptyState from '../components/EmptyState'
 import PageHeader from '../components/PageHeader'
+import RangeGauge from '../components/RangeGauge'
 import RelativeTime from '../components/RelativeTime'
+import StatCard from '../components/StatCard'
 import TableSkeleton from '../components/TableSkeleton'
 import { useAuth } from '../context/AuthContext'
 import { useNavCounts } from '../context/NavCountsContext'
@@ -69,10 +84,11 @@ import {
 } from '../lib/geo'
 import { hoverLiftSx } from '../lib/hoverLift'
 import { mapUrl } from '../lib/mapUrl'
+import { gaugeScale } from '../lib/rangeGauge'
 // The battery levels are the battery chart's: below 40 % getting low, below 20 % low
 import { batteryLevel, nodeSeries, temperatureSparklines } from '../lib/sensorCharts'
 import { visuallyHidden } from '../lib/visuallyHidden'
-import { chartTokens } from '../theme/theme'
+import { chartTokens, tokens } from '../theme/theme'
 
 // How often nodes and alerts reload while the page is open and the browser tab is visible
 const REFRESH_INTERVAL_MS = 15 * 1000
@@ -106,6 +122,23 @@ const batteryLevelLabels = { low: 'Low', warning: 'Getting low', ok: null }
 const STATUS_DOT_SIZE = 10
 const TIMELINE_ICON_SIZE = 40
 
+// A node card's top border, by the severity of its latest device state (device_alert_codes).
+// INFO and no state get the plain grey border. A node that isn't online keeps the red border if
+// its last state was CRITICAL (it may have gone quiet because of it, e.g. a power loss or a
+// stolen box), and otherwise goes grey, as its state is out of date. The device state chip says
+// the severity in words.
+const deviceStateAccents = { WARNING: 'warning.main', CRITICAL: 'error.main' }
+const NODE_CARD_ACCENT_WIDTH = 4
+
+// The span of a temperature gauge with no alert limits to centre on (still loading, or they
+// failed), in °C. Widened if a reading falls outside it.
+const TEMPERATURE_FALLBACK_SCALE = [0, 50]
+// Humidity and soil moisture are percentages, so their gauges always run 0–100
+const PERCENT_SCALE = { min: 0, max: 100 }
+// How close two node labels on an Alert limits bar can be (in percent of its width) before they
+// go on separate rows: further on a phone, where a label takes up more of the bar
+const LIMIT_LABEL_GAP = { narrow: 45, wide: 22 }
+
 // A ring that grows out from an online node's dot and fades. Off under reduced motion.
 function statusPulse(color) {
   return keyframes`
@@ -132,6 +165,11 @@ export default function SensorDashboard() {
   // The hourly rows the charts last loaded ({ rows, now }), or null until they load or if they
   // failed. The node cards' sparklines come from these, with no query of their own.
   const [hourlyReadings, setHourlyReadings] = useState(null)
+  // Every alert limit row ({ data, error } from getAlertThresholds), as the charts loaded them, or
+  // null until then. The node cards' gauges and the Alert limits section read them from here.
+  const [thresholdRows, setThresholdRows] = useState(null)
+  // The global alert limits, for the Alert limits section and as the node cards' fallback
+  const globalLimits = useGlobalLimits()
   // Only the newest load may update the page, so a slow earlier one can't overwrite newer data
   const latestLoad = useRef(0)
 
@@ -257,12 +295,63 @@ export default function SensorDashboard() {
             nodes={snapshot.nodes}
             refreshKey={chartRefreshKey}
             onHourlyReadings={setHourlyReadings}
+            onThresholds={setThresholdRows}
           />
-          <NodesSection nodes={snapshot.nodes} now={checkedAt} hourlyReadings={hourlyReadings} />
-          <ThresholdsCard />
+          <NodesSection
+            nodes={snapshot.nodes}
+            now={checkedAt}
+            hourlyReadings={hourlyReadings}
+            thresholdRows={thresholdRows}
+            globalLimits={globalLimits.result?.data ?? null}
+          />
+          <ThresholdsCard
+            nodes={snapshot.nodes}
+            now={checkedAt}
+            thresholdRows={thresholdRows}
+            globalLimits={globalLimits}
+          />
         </>
       ) : null}
     </Stack>
+  )
+}
+
+// The global alert limits (getGlobalThresholds, 009), loaded once since they rarely change:
+// { result, isLoading, retry }, with result { data, error } once loaded (data null if there is no
+// global row). Loaded here rather than in ThresholdsCard so the node cards shade the very same
+// limits that the Alert limits section shows.
+function useGlobalLimits() {
+  const { getGlobalThresholds } = useSensors()
+  const [attempt, setAttempt] = useState(0)
+  // Kept with the attempt it was loaded for, so Retry shows loading again
+  const [result, setResult] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getGlobalThresholds().then((nextResult) => {
+      if (!cancelled) setResult({ attempt, ...nextResult })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [getGlobalThresholds, attempt])
+
+  const retry = useCallback(() => setAttempt((current) => current + 1), [])
+  return { result, isLoading: result?.attempt !== attempt, retry }
+}
+
+// The alert limits that apply to a node, the same rule as check_reading_thresholds (009): its own
+// row (from `thresholdRows`, getAlertThresholds) if it has one, otherwise the global limits. The
+// global limits come from `globalLimits` (the row the Alert limits section shows), or from the
+// global row in `thresholdRows` if that hasn't loaded. Null while neither has loaded, if both
+// failed, or if there are no limits.
+function limitsForNode(thresholdRows, globalLimits, nodeId) {
+  const rows = thresholdRows && !thresholdRows.error ? thresholdRows.data : []
+  return (
+    rows.find((row) => row.sensor_node_id === nodeId) ??
+    globalLimits ??
+    rows.find((row) => row.sensor_node_id == null) ??
+    null
   )
 }
 
@@ -276,45 +365,48 @@ function SummaryCards({ nodes, openAlerts, now }) {
   const statuses = nodes.map((node) => nodeStatus(node, now))
   const count = (status) => statuses.filter((value) => value === status).length
   const inactive = count('inactive')
+  const offline = count('offline')
   const highSeverity = openAlerts.filter((alert) => alert.severity === 'high').length
 
+  // The same cards as the Dashboard's. The offline and open alerts tiles turn amber or red only
+  // when there is something to look at; the number and caption say it in words either way.
   return (
     <Grid container spacing={2}>
-      <SummaryCard
-        title="Total nodes"
-        value={nodes.length}
-        detail={inactive > 0 ? `${inactive} inactive` : null}
-      />
-      <SummaryCard title="Online" value={count('online')} />
-      <SummaryCard title="Offline" value={count('offline')} />
-      <SummaryCard
-        title="Open alerts"
-        value={openAlerts.length}
-        detail={`${highSeverity} high severity`}
-        detailColor={highSeverity > 0 ? 'error.main' : 'text.secondary'}
-      />
-    </Grid>
-  )
-}
-
-function SummaryCard({ title, value, detail, detailColor = 'text.secondary' }) {
-  return (
-    <Grid size={{ xs: 6, md: 3 }}>
-      <Card variant="outlined" sx={{ height: '100%' }}>
-        <CardContent>
-          <Typography variant="body2" color="textSecondary" component="h2">
-            {title}
-          </Typography>
-          <Typography variant="h1" component="p">
-            {value.toLocaleString()}
-          </Typography>
-          {detail ? (
-            <Typography variant="caption" sx={{ color: detailColor }}>
-              {detail}
-            </Typography>
-          ) : null}
-        </CardContent>
-      </Card>
+      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+        <StatCard
+          icon={SensorsOutlinedIcon}
+          color="primary"
+          label="Total nodes"
+          value={nodes.length.toLocaleString()}
+          caption={inactive > 0 ? `${inactive.toLocaleString()} inactive` : null}
+        />
+      </Grid>
+      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+        <StatCard
+          icon={WifiOutlinedIcon}
+          color="success"
+          label="Online"
+          value={count('online').toLocaleString()}
+        />
+      </Grid>
+      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+        <StatCard
+          icon={WifiOffOutlinedIcon}
+          color={offline > 0 ? 'warning' : 'primary'}
+          label="Offline"
+          value={offline.toLocaleString()}
+          caption={`No reading for ${OFFLINE_AFTER_MS / 60000} minutes`}
+        />
+      </Grid>
+      <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+        <StatCard
+          icon={NotificationsActiveOutlinedIcon}
+          color={highSeverity > 0 ? 'error' : 'warning'}
+          label="Open alerts"
+          value={openAlerts.length.toLocaleString()}
+          caption={`${highSeverity.toLocaleString()} high severity`}
+        />
+      </Grid>
     </Grid>
   )
 }
@@ -330,6 +422,10 @@ function AlertsSection({ openAlerts, acknowledgedAlerts, now, onChanged }) {
   // Ids of alerts being acknowledged, so each button is disabled until its alert leaves the list
   const [savingIds, setSavingIds] = useState(() => new Set())
   const [error, setError] = useState(null)
+  // On the All tab the acknowledged alerts are history, so they are folded away behind a
+  // "Show N acknowledged" button until asked for
+  const [showAcknowledged, setShowAcknowledged] = useState(false)
+  const listId = useId()
 
   async function handleAcknowledge(id) {
     setSavingIds((current) => new Set(current).add(id))
@@ -364,7 +460,10 @@ function AlertsSection({ openAlerts, acknowledgedAlerts, now, onChanged }) {
     open: `No open ${kind}alerts`,
     acknowledged: `No acknowledged ${kind}alerts yet`,
   }
-  const alerts = alertsByTab[tab]
+  const canFoldAcknowledged = tab === 'all' && shownAcknowledged.length > 0
+  const alerts = canFoldAcknowledged && !showAcknowledged ? shownOpen : alertsByTab[tab]
+  // With the acknowledged ones folded away, an empty list just means nothing is open
+  const emptyMessage = canFoldAcknowledged ? emptyMessages.open : emptyMessages[tab]
 
   return (
     <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
@@ -410,9 +509,9 @@ function AlertsSection({ openAlerts, acknowledgedAlerts, now, onChanged }) {
         ) : null}
 
         {alerts.length === 0 ? (
-          <EmptyState message={emptyMessages[tab]} dense />
+          <EmptyState message={emptyMessage} dense />
         ) : (
-          <Box component="ol" sx={{ listStyle: 'none', m: 0, p: 0 }}>
+          <Box component="ol" id={listId} sx={{ listStyle: 'none', m: 0, p: 0 }}>
             {alerts.map((alert, index) => (
               <AlertItem
                 key={alert.id}
@@ -426,6 +525,22 @@ function AlertsSection({ openAlerts, acknowledgedAlerts, now, onChanged }) {
             ))}
           </Box>
         )}
+
+        {canFoldAcknowledged ? (
+          <Button
+            variant="text"
+            onClick={() => setShowAcknowledged((current) => !current)}
+            aria-expanded={showAcknowledged}
+            // The list is only there when something is in it
+            aria-controls={alerts.length > 0 ? listId : undefined}
+            startIcon={showAcknowledged ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            sx={{ alignSelf: 'flex-start' }}
+          >
+            {showAcknowledged
+              ? 'Hide acknowledged'
+              : `Show ${shownAcknowledged.length.toLocaleString()} acknowledged`}
+          </Button>
+        ) : null}
       </Stack>
     </Paper>
   )
@@ -563,7 +678,7 @@ function acknowledgedByName(alert, currentUserId) {
   return alert.acknowledged_by_profile?.full_name ?? 'Another staff member'
 }
 
-function NodesSection({ nodes, now, hourlyReadings }) {
+function NodesSection({ nodes, now, hourlyReadings, thresholdRows, globalLimits }) {
   const [selectedNode, setSelectedNode] = useState(null)
   // Each sparkline is drawn in its node's colour from the charts above, so they match
   const seriesByNode = useMemo(
@@ -592,6 +707,7 @@ function NodesSection({ nodes, now, hourlyReadings }) {
                   <NodeCard
                     node={node}
                     now={now}
+                    limits={limitsForNode(thresholdRows, globalLimits, node.id)}
                     sparkline={sparklines?.get(node.id) ?? null}
                     sparklineColor={seriesByNode.get(node.id)?.color ?? chartTokens.other}
                     onSelect={() => setSelectedNode(node)}
@@ -615,33 +731,107 @@ function NodesSection({ nodes, now, hourlyReadings }) {
 }
 
 // One node: name and status, its plant, the latest device state, a red banner if the box has been
-// moved, the latest readings with a 24 h temperature sparkline, battery, when it last reported and
-// where it is. Clicking anywhere on the card opens its latest readings; the name is a real button,
+// moved, the latest readings in two groups, a 24 h temperature sparkline, battery, when it last
+// reported, and a footer with where it is. The top border is coloured by the device state's
+// severity. Clicking anywhere on the card opens its latest readings; the name is a real button,
 // so that also works from the keyboard.
+//
+// Environment: temperature, humidity and soil moisture as gauges, with the node's alert limits
+// (`limits`, see limitsForNode) shaded as the safe band. Security: motion, rain and person seen
+// as chips, and the box and plant tilt as an icon leaning at that angle.
 //
 // The device fields (alert_status, tilts, soil moisture, rain, person seen and the GPS fix) come
 // from the latest reading on sensor_node_latest (020). Each one is left out when that reading
 // doesn't have it: the gateway only sends them once SEND_EXTRA_FIELDS is on, and the GPS fix only
 // when the box has one. Before 020 is applied the view has none of them, so none show.
-function NodeCard({ node, now, sparkline, sparklineColor, onSelect }) {
+function NodeCard({ node, now, limits, sparkline, sparklineColor, onSelect }) {
   const status = nodeStatus(node, now)
+  const isOnline = status === 'online'
   const hasReading = Boolean(node.reading_id)
   const movedBy = distanceFromInstalled(node, node.reading_latitude, node.reading_longitude)
   const isMoved = movedBy != null && movedBy > MOVED_DISTANCE_M
+  const isCritical = node.alert_status_severity === 'CRITICAL'
+  // A CRITICAL state from a node that has since stopped reporting, so its card stays red
+  const isStaleCritical = isCritical && !isOnline
+  const accent =
+    ((isOnline || isCritical) && deviceStateAccents[node.alert_status_severity]) || tokens.border
+
   // Only the ones the latest reading has
-  const deviceMetrics = [
-    { label: 'Box tilt', value: node.tilt_angle, format: (value) => `${formatNumber(value)}°` },
-    { label: 'Plant tilt', value: node.plant_tilt_angle, format: (value) => `${formatNumber(value)}°` },
-    { label: 'Soil moisture', value: node.soil_moisture, format: (value) => `${formatNumber(value)} %` },
-    { label: 'Rain', value: node.is_raining, format: yesNo },
-    { label: 'Person seen', value: node.human_detected, format: yesNo },
-  ].filter((metric) => metric.value != null)
+  const temperatureBand = limits ? [Number(limits.temperature_min), Number(limits.temperature_max)] : null
+  const gauges = [
+    {
+      id: 'temperature',
+      label: 'Temperature',
+      value: node.temperature,
+      unit: '°C',
+      band: temperatureBand,
+      scale: gaugeScale({
+        band: temperatureBand,
+        values: [node.temperature],
+        fallback: TEMPERATURE_FALLBACK_SCALE,
+      }),
+    },
+    {
+      id: 'humidity',
+      label: 'Humidity',
+      value: node.humidity,
+      unit: '%',
+      band: limits ? [Number(limits.humidity_min), Number(limits.humidity_max)] : null,
+      scale: PERCENT_SCALE,
+    },
+    // No alert limits for soil moisture, so no band
+    { id: 'soil', label: 'Soil moisture', value: node.soil_moisture, unit: '%', band: null, scale: PERCENT_SCALE },
+  ].filter((gauge) => hasReading && gauge.value != null)
+
+  const signals = [
+    node.motion_detected != null && {
+      id: 'motion',
+      icon: DirectionsRunOutlinedIcon,
+      color: 'warning',
+      isOn: node.motion_detected,
+      label: node.motion_detected ? `Motion${motionSeconds(node)}` : 'No motion',
+      description: node.motion_detected
+        ? `Motion detected${motionSeconds(node, ' for ')} in the latest reading`
+        : 'No motion in the latest reading',
+    },
+    node.is_raining != null && {
+      id: 'rain',
+      icon: UmbrellaOutlinedIcon,
+      color: 'primary',
+      isOn: node.is_raining,
+      label: node.is_raining ? 'Rain' : 'No rain',
+      description: node.is_raining
+        ? 'Raining at the latest reading'
+        : 'Not raining at the latest reading',
+    },
+    node.human_detected != null && {
+      id: 'person',
+      icon: PersonOutlineOutlinedIcon,
+      color: 'warning',
+      isOn: node.human_detected,
+      label: node.human_detected ? 'Person seen' : 'No person',
+      description: node.human_detected
+        ? 'A person was detected at the latest reading'
+        : 'No person detected at the latest reading',
+    },
+  ].filter((signal) => hasReading && signal)
+
+  const tilts = [
+    { id: 'box', label: 'Box tilt', value: node.tilt_angle, icon: Inventory2OutlinedIcon },
+    { id: 'plant', label: 'Plant tilt', value: node.plant_tilt_angle, icon: LocalFloristOutlinedIcon },
+  ].filter((tilt) => hasReading && tilt.value != null)
 
   return (
     <Card
       variant="outlined"
       onClick={onSelect}
-      sx={(theme) => ({ height: '100%', cursor: 'pointer', ...hoverLiftSx(theme) })}
+      sx={(theme) => ({
+        height: '100%',
+        cursor: 'pointer',
+        borderTopWidth: NODE_CARD_ACCENT_WIDTH,
+        borderTopColor: accent,
+        ...hoverLiftSx(theme),
+      })}
     >
       <CardContent sx={{ height: '100%' }}>
         {/* Gaps rather than margins, so the footer's auto top margin can push it down */}
@@ -680,7 +870,7 @@ function NodeCard({ node, now, sparkline, sparklineColor, onSelect }) {
             <StatusIndicator status={status} />
           </Stack>
 
-          {node.alert_status ? <DeviceStateChip node={node} /> : null}
+          {node.alert_status ? <DeviceStateChip node={node} isStale={isStaleCritical} /> : null}
 
           {isMoved ? (
             <Alert
@@ -703,25 +893,48 @@ function NodeCard({ node, now, sparkline, sparklineColor, onSelect }) {
             </Alert>
           ) : null}
 
-          <Stack direction="row" spacing={3} useFlexGap sx={{ flexWrap: 'wrap' }}>
-            <Metric
-              label="Temperature"
-              value={hasReading ? formatMeasurement(node.temperature, '°C') : '—'}
-            />
-            <Metric
-              label="Humidity"
-              value={hasReading ? formatMeasurement(node.humidity, '%') : '—'}
-            />
-            <Metric label="Motion" value={hasReading ? formatMotion(node) : '—'} />
-            {deviceMetrics.map((metric) => (
-              <Metric key={metric.label} label={metric.label} value={metric.format(metric.value)} />
-            ))}
-          </Stack>
+          {gauges.length > 0 ? (
+            <MetricGroup title="Environment">
+              {/* One grid for every row, so the gauges all start and end at the same place */}
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+                  alignItems: 'center',
+                  columnGap: 1.5,
+                  rowGap: 1,
+                }}
+              >
+                {gauges.map((gauge) => (
+                  <EnvironmentGauge key={gauge.id} {...gauge} isMuted={!isOnline} />
+                ))}
+              </Box>
+            </MetricGroup>
+          ) : null}
+
+          {signals.length > 0 || tilts.length > 0 ? (
+            <MetricGroup title="Security">
+              {signals.length > 0 ? (
+                <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+                  {signals.map((signal) => (
+                    <SignalChip key={signal.id} {...signal} />
+                  ))}
+                </Stack>
+              ) : null}
+              {tilts.length > 0 ? (
+                <Stack direction="row" spacing={3} useFlexGap sx={{ flexWrap: 'wrap' }}>
+                  {tilts.map((tilt) => (
+                    <TiltIndicator key={tilt.id} {...tilt} />
+                  ))}
+                </Stack>
+              ) : null}
+            </MetricGroup>
+          ) : null}
 
           {sparkline ? <Sparkline values={sparkline} color={sparklineColor} /> : null}
 
           {/* Pushed to the bottom, so the footers line up across a row of cards */}
-          <Stack spacing={0.5} sx={{ mt: 'auto' }}>
+          <Stack spacing={1.5} sx={{ mt: 'auto' }}>
             <Stack
               direction="row"
               spacing={2}
@@ -739,7 +952,15 @@ function NodeCard({ node, now, sparkline, sparklineColor, onSelect }) {
                 )}
               </Typography>
             </Stack>
-            <Typography variant="caption" color="textSecondary">
+            <Typography
+              variant="caption"
+              color="textSecondary"
+              component="p"
+              sx={{ pt: 1, borderTop: 1, borderColor: 'divider' }}
+            >
+              <Box component="span" sx={visuallyHidden}>
+                Installed at{' '}
+              </Box>
               {node.latitude.toFixed(5)}, {node.longitude.toFixed(5)}
               {' · '}
               <Link
@@ -758,38 +979,162 @@ function NodeCard({ node, now, sparkline, sparklineColor, onSelect }) {
   )
 }
 
+// A titled group of readings on a node card, e.g. "Environment"
+function MetricGroup({ title, children }) {
+  return (
+    <Stack spacing={1}>
+      <Typography
+        variant="caption"
+        component="h4"
+        color="textSecondary"
+        sx={{ fontWeight: 600 }}
+      >
+        {title}
+      </Typography>
+      {children}
+    </Stack>
+  )
+}
+
+// One row of the Environment grid: the label, a gauge, then the number and unit. A value outside
+// the band gets a red marker, red text and an error icon, and screen readers hear whether it is
+// within the safe range (the gauge itself is hidden from them). `isMuted` greys the marker and the
+// band for a node that isn't online, as its reading may be out of date.
+function EnvironmentGauge({ label, value, unit, band, scale, isMuted }) {
+  const number = Number(value)
+  const isOutside = band != null && (number < band[0] || number > band[1])
+  let tone = 'normal'
+  if (isMuted) tone = 'muted'
+  else if (isOutside) tone = 'outside'
+
+  return (
+    <>
+      <Typography variant="body2" color="textSecondary" sx={{ whiteSpace: 'nowrap' }}>
+        {label}
+      </Typography>
+      <RangeGauge
+        scale={scale}
+        band={band}
+        isBandMuted={isMuted}
+        markers={[{ key: 'value', value: number, tone }]}
+      />
+      <Typography
+        variant="body2"
+        sx={{
+          justifySelf: 'end',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 0.5,
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          color: isOutside ? 'error.main' : 'text.primary',
+        }}
+      >
+        {isOutside ? <ErrorOutlineOutlinedIcon fontSize="inherit" aria-hidden="true" /> : null}
+        {formatNumber(number)} {unit}
+        {band ? (
+          <Box component="span" sx={visuallyHidden}>
+            , {isOutside ? 'outside' : 'within'} the safe range of {formatNumber(band[0])} to{' '}
+            {formatNumber(band[1])} {unit}
+          </Box>
+        ) : null}
+      </Typography>
+    </>
+  )
+}
+
+// A yes/no reading as a chip: lit in `color` when on, grey and outlined when off. The label says
+// the state in words ("Rain", "No rain"), and the tooltip says it in full.
+function SignalChip({ icon: Icon, color, isOn, label, description }) {
+  return (
+    <Tooltip title={description} describeChild>
+      <Chip
+        size="small"
+        variant={isOn ? 'filled' : 'outlined'}
+        color={isOn ? color : 'default'}
+        icon={<Icon aria-hidden="true" />}
+        label={label}
+        sx={
+          isOn
+            ? { fontWeight: 500 }
+            : { color: 'text.secondary', '& .MuiChip-icon': { color: 'text.disabled' } }
+        }
+      />
+    </Tooltip>
+  )
+}
+
+// A tilt angle (0° upright to 180° upside down, 018) as an icon leaning at that angle, then the
+// label and the degrees in words. The icon turns smoothly to a new angle, except under reduced
+// motion.
+function TiltIndicator({ icon: Icon, label, value }) {
+  const angle = Number(value)
+  return (
+    <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+      <Icon
+        fontSize="small"
+        aria-hidden="true"
+        sx={(theme) => ({
+          color: 'text.secondary',
+          transform: `rotate(${angle}deg)`,
+          transition: theme.transitions.create('transform', {
+            duration: theme.transitions.duration.standard,
+          }),
+          '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+        })}
+      />
+      <Typography variant="body2" sx={{ whiteSpace: 'nowrap' }}>
+        <Box component="span" sx={{ color: 'text.secondary' }}>
+          {label}
+        </Box>{' '}
+        <Box component="span" sx={{ fontWeight: 500 }}>
+          {formatNumber(angle)}°
+        </Box>
+      </Typography>
+    </Stack>
+  )
+}
+
 // The latest reading's alert_status as a chip, e.g. "Critical fall", coloured by the code's
 // severity from device_alert_codes (on sensor_node_latest, 020). The code's meaning is the
-// chip's tooltip and is also read out by screen readers.
-function DeviceStateChip({ node }) {
+// chip's tooltip and is also read out by screen readers. `isStale` (a CRITICAL state from a node
+// that is no longer online) adds a caption under the chip saying so.
+function DeviceStateChip({ node, isStale = false }) {
   const Icon = deviceAlertCodes[node.alert_status]?.icon ?? null
   const label = deviceCodeLabel(node.alert_status)
   const meaning = node.alert_status_description
 
   return (
-    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-      <Typography variant="caption" color="textSecondary">
-        Device state
-      </Typography>
-      {/* An empty title shows no tooltip */}
-      <Tooltip title={meaning ?? ''}>
-        <Chip
-          size="small"
-          variant="outlined"
-          icon={Icon ? <Icon aria-hidden="true" /> : undefined}
-          label={
-            <>
-              {label}
-              {meaning ? (
-                <Box component="span" sx={visuallyHidden}>
-                  : {meaning}
-                </Box>
-              ) : null}
-            </>
-          }
-          color={deviceStateColors[node.alert_status_severity] ?? 'default'}
-        />
-      </Tooltip>
+    <Stack spacing={0.5}>
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+        <Typography variant="caption" color="textSecondary">
+          Device state
+        </Typography>
+        {/* An empty title shows no tooltip */}
+        <Tooltip title={meaning ?? ''}>
+          <Chip
+            size="small"
+            variant="outlined"
+            icon={Icon ? <Icon aria-hidden="true" /> : undefined}
+            label={
+              <>
+                {label}
+                {meaning ? (
+                  <Box component="span" sx={visuallyHidden}>
+                    : {meaning}
+                  </Box>
+                ) : null}
+              </>
+            }
+            color={deviceStateColors[node.alert_status_severity] ?? 'default'}
+          />
+        </Tooltip>
+      </Stack>
+      {isStale ? (
+        <Typography variant="caption" color="textSecondary">
+          Last state before going offline
+        </Typography>
+      ) : null}
     </Stack>
   )
 }
@@ -818,19 +1163,6 @@ function StatusIndicator({ status }) {
         sx={{ fontWeight: 500, color: isOnline ? 'success.main' : 'text.secondary' }}
       >
         {nodeStatusLabels[status]}
-      </Typography>
-    </Stack>
-  )
-}
-
-function Metric({ label, value }) {
-  return (
-    <Stack spacing={0.25}>
-      <Typography variant="caption" color="textSecondary">
-        {label}
-      </Typography>
-      <Typography variant="body1" sx={{ fontWeight: 500, whiteSpace: 'nowrap' }}>
-        {value}
       </Typography>
     </Stack>
   )
@@ -1094,24 +1426,49 @@ function PositionsTable({ node, positions, loadedAt }) {
   )
 }
 
-// The global alert limits (009), read-only. Loaded once: they rarely change.
-function ThresholdsCard() {
-  const { getGlobalThresholds } = useSensors()
-  const [attempt, setAttempt] = useState(0)
-  const [result, setResult] = useState(null)
-
-  useEffect(() => {
-    let cancelled = false
-    getGlobalThresholds().then((nextResult) => {
-      if (!cancelled) setResult({ attempt, ...nextResult })
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [getGlobalThresholds, attempt])
-
-  const isLoading = result?.attempt !== attempt
+// The global alert limits (009), read-only, as three range bars (temperature, humidity and motion
+// duration): the allowed band shaded, with each node's latest value as a labelled marker. Nodes
+// with their own limits (from `thresholdRows`, see the page) are left off and named below, since
+// the global band doesn't apply to them. Loaded once: they rarely change.
+// `globalLimits` is the page's useGlobalLimits(): the node cards' gauges shade the same limits.
+function ThresholdsCard({ nodes, now, thresholdRows, globalLimits }) {
+  // Labels need more room, in percent of the bar, when the bar is narrow
+  const isNarrow = useMediaQuery((theme) => theme.breakpoints.down('sm'))
+  const { result, isLoading, retry } = globalLimits
   const limits = result?.data
+
+  // Active nodes that have sent a reading and use the global limits
+  const ownLimitIds = new Set(
+    (thresholdRows?.data ?? [])
+      .filter((row) => row.sensor_node_id != null)
+      .map((row) => row.sensor_node_id),
+  )
+  const shownNodes = nodes.filter(
+    (node) => node.is_active && node.reading_id && !ownLimitIds.has(node.id),
+  )
+  const ownLimitNames = nodes
+    .filter((node) => ownLimitIds.has(node.id))
+    .map((node) => node.node_identifier)
+    .sort()
+  const markerOf = (node, value, isOutside) => ({
+    key: node.id,
+    name: node.node_identifier,
+    value,
+    isOutside,
+    isOffline: nodeStatus(node, now) !== 'online',
+  })
+
+  const bars = limits
+    ? limitBars(limits).map((bar) => ({
+        ...bar,
+        markers: shownNodes
+          .map((node) => {
+            const value = bar.valueOf(node)
+            return value == null ? null : markerOf(node, value, bar.isOutside(value))
+          })
+          .filter(Boolean),
+      }))
+    : []
 
   return (
     <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
@@ -1123,11 +1480,7 @@ function ThresholdsCard() {
           <Alert
             severity="error"
             action={
-              <Button
-                color="inherit"
-                size="small"
-                onClick={() => setAttempt((current) => current + 1)}
-              >
+              <Button color="inherit" size="small" onClick={retry}>
                 Retry
               </Button>
             }
@@ -1144,20 +1497,178 @@ function ThresholdsCard() {
 
         {!isLoading && limits ? (
           <>
-            <Typography variant="body1">
+            <Typography variant="body2" color="textSecondary">
+              An alert is raised when a reading falls outside these limits. They apply to every
+              node that doesn&apos;t have its own limits.
+              {ownLimitNames.length > 0
+                ? ` ${ownLimitNames.join(', ')} ${
+                    ownLimitNames.length === 1 ? 'has its' : 'have their'
+                  } own limits, so ${ownLimitNames.length === 1 ? 'isn’t' : 'aren’t'} shown.`
+                : null}
+            </Typography>
+            {/* The limits in one line, for screen readers. Each bar below also describes
+                itself, with every node's value. */}
+            <Typography variant="body1" sx={visuallyHidden}>
               Temperature {formatNumber(limits.temperature_min)}–
               {formatNumber(limits.temperature_max)} °C, humidity{' '}
               {formatNumber(limits.humidity_min)}–{formatNumber(limits.humidity_max)} %, motion
               lasting {limits.motion_window_seconds} s or longer
             </Typography>
-            <Typography variant="body2" color="textSecondary">
-              An alert is raised when a reading falls outside these limits. They apply to every
-              node that doesn&apos;t have its own limits.
-            </Typography>
+            <Stack spacing={3} sx={{ pt: 1 }}>
+              {bars.map((bar) => (
+                <LimitBar
+                  key={bar.id}
+                  bar={bar}
+                  labelGap={isNarrow ? LIMIT_LABEL_GAP.narrow : LIMIT_LABEL_GAP.wide}
+                />
+              ))}
+            </Stack>
           </>
         ) : null}
       </Stack>
     </Paper>
+  )
+}
+
+// The three bars in the Alert limits section, for the global `limits` row. For each: its band,
+// its span, how to read a node's value, and whether a value raises an alert, by the same rules as
+// check_reading_thresholds (009).
+function limitBars(limits) {
+  const temperature = [Number(limits.temperature_min), Number(limits.temperature_max)]
+  const humidity = [Number(limits.humidity_min), Number(limits.humidity_max)]
+  const motionWindow = Number(limits.motion_window_seconds)
+  const outsideBand = (band) => (value) => value < band[0] || value > band[1]
+
+  return [
+    {
+      id: 'temperature',
+      title: 'Temperature',
+      unit: '°C',
+      band: temperature,
+      rule: `Alert below ${formatNumber(temperature[0])} °C or above ${formatNumber(temperature[1])} °C`,
+      valueOf: (node) => (node.temperature != null ? Number(node.temperature) : null),
+      isOutside: outsideBand(temperature),
+      fallback: TEMPERATURE_FALLBACK_SCALE,
+    },
+    {
+      id: 'humidity',
+      title: 'Humidity',
+      unit: '%',
+      band: humidity,
+      rule: `Alert below ${formatNumber(humidity[0])} % or above ${formatNumber(humidity[1])} %`,
+      valueOf: (node) => (node.humidity != null ? Number(node.humidity) : null),
+      isOutside: outsideBand(humidity),
+      scale: PERCENT_SCALE,
+    },
+    {
+      // An alert is raised when motion lasts the whole window or longer, so the allowed band
+      // runs from no motion up to the window. A reading with no motion counts as 0 s.
+      id: 'motion',
+      title: 'Motion duration',
+      unit: 's',
+      band: [0, motionWindow],
+      rule: `Alert when motion lasts ${formatNumber(motionWindow)} s or longer`,
+      valueOf: (node) =>
+        node.motion_detected ? Number(node.motion_duration_seconds ?? 0) : 0,
+      isOutside: (value) => value >= motionWindow,
+      floor: 0,
+    },
+  ]
+}
+
+// One bar of the Alert limits section: its title and rule, then the band with a labelled marker
+// per node. A node outside the band has a red marker and an error icon on its label; an offline
+// node's marker is grey and its label says "offline", as its value may be out of date.
+function LimitBar({ bar, labelGap }) {
+  const { title, unit, band, rule, markers } = bar
+  const scale =
+    bar.scale ??
+    gaugeScale({
+      band,
+      values: markers.map((marker) => marker.value),
+      fallback: bar.fallback,
+      floor: bar.floor,
+    })
+  const valueText = (marker) => `${formatNumber(marker.value)} ${unit}`
+
+  const description = [
+    `${title}: ${rule}.`,
+    markers.length === 0
+      ? 'No current readings.'
+      : markers
+          .map((marker) =>
+            [
+              `${marker.name} ${valueText(marker)}`,
+              marker.isOutside ? 'outside the limits' : null,
+              marker.isOffline ? 'offline' : null,
+            ]
+              .filter(Boolean)
+              .join(', '),
+          )
+          .join('; ') + '.',
+  ].join(' ')
+
+  return (
+    <Stack spacing={0.5}>
+      <Stack
+        direction={{ xs: 'column', sm: 'row' }}
+        spacing={{ xs: 0, sm: 1.5 }}
+        sx={{ alignItems: { xs: 'flex-start', sm: 'baseline' } }}
+      >
+        <Typography variant="body1" component="h3" sx={{ fontWeight: 500 }}>
+          {title}
+        </Typography>
+        <Typography variant="body2" color="textSecondary">
+          {rule}
+        </Typography>
+      </Stack>
+      <RangeGauge
+        size="medium"
+        scale={scale}
+        band={band}
+        bandLabels={band.map((value) => `${formatNumber(value)} ${unit}`)}
+        description={description}
+        labelGap={labelGap}
+        markers={markers.map((marker) => {
+          let tone = 'normal'
+          if (marker.isOffline) tone = 'muted'
+          else if (marker.isOutside) tone = 'outside'
+          return {
+            key: marker.key,
+            value: marker.value,
+            tone,
+            label: (
+              <Box
+                component="span"
+                sx={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 0.25,
+                  color: marker.isOutside ? 'error.main' : 'text.primary',
+                }}
+              >
+                {marker.isOutside ? <ErrorOutlineOutlinedIcon fontSize="inherit" /> : null}
+                <Box component="span" sx={{ fontWeight: 500 }}>
+                  {marker.name}
+                </Box>{' '}
+                {valueText(marker)}
+                {marker.isOffline ? (
+                  <Box component="span" sx={{ color: 'text.secondary' }}>
+                    {' '}
+                    · offline
+                  </Box>
+                ) : null}
+              </Box>
+            ),
+          }
+        })}
+      />
+      {markers.length === 0 ? (
+        <Typography variant="caption" color="textSecondary">
+          No current readings to show.
+        </Typography>
+      ) : null}
+    </Stack>
   )
 }
 
@@ -1170,8 +1681,10 @@ function formatMeasurement(value, unit) {
   return value != null ? `${formatNumber(value)} ${unit}` : '—'
 }
 
-function yesNo(value) {
-  return value ? 'Yes' : 'No'
+// How long the motion lasted, e.g. " · 12 s" (or " for 12 s" with that `joiner`), or nothing
+// when the reading doesn't say
+function motionSeconds({ motion_duration_seconds: duration }, joiner = ' · ') {
+  return duration != null ? `${joiner}${formatNumber(duration)} s` : ''
 }
 
 function formatMotion({ motion_detected: detected, motion_duration_seconds: duration }) {
