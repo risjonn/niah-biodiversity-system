@@ -5,8 +5,6 @@ import {
   BarChart,
   BarStack,
   CartesianGrid,
-  Cell,
-  LabelList,
   Legend,
   Line,
   LineChart,
@@ -17,20 +15,19 @@ import {
 } from 'recharts'
 import ChartCard from './ChartCard'
 import { useSensors } from '../hooks/useSensors'
+import { deviceCodeLabel } from '../lib/alerts'
 import {
-  batteryLevel,
   chartRanges,
   chartWindow,
   formatBucket,
   formatEveryThirdSarawakHour,
   formatSarawakDay,
   formatSarawakHour,
-  LOW_BATTERY_PERCENT,
-  BATTERY_WARNING_PERCENT,
   lineTicks,
   nodeSeries,
   seriesWithReadings,
   toAverageRows,
+  toDeviceAlertRows,
   toMotionRows,
 } from '../lib/sensorCharts'
 import { chartTokens, theme, tokens } from '../theme/theme'
@@ -67,17 +64,24 @@ const limitLine = {
   ifOverflow: 'extendDomain',
 }
 
-const batteryColors = { low: tokens.error, warning: tokens.alert, ok: tokens.success }
-const batteryLevelLabels = { low: 'Low', warning: 'Getting low', ok: null }
+// A device alert code's severity (device_alert_codes, 018) as a mark beside its label on the
+// Device alerts chart. Each severity has its own shape as well as its status colour, and its name
+// is in the subtitle and the tooltip, so it never relies on colour alone.
+const severityMarks = {
+  CRITICAL: { label: 'Critical', shape: 'circle', color: tokens.error },
+  WARNING: { label: 'Warning', shape: 'triangle', color: tokens.alert },
+  INFO: { label: 'Info', shape: 'ring', color: tokens.textSecondary },
+}
+// Room for the longest code label ("Fire or canopy breach · 999") and its severity mark, in px
+const DEVICE_ALERT_AXIS_WIDTH = 190
+// Height per code on the Device alerts chart, and the least the chart is drawn at, in px
+const DEVICE_ALERT_ROW_HEIGHT = 36
+const DEVICE_ALERT_MIN_HEIGHT = 300
 
-// Recharts doesn't draw a 0 bar, and so not its label either. A 0 % battery is drawn as a
-// sliver on the baseline so its value still shows.
-const ZERO_BAR_SIZE = 2
-
-// Temperature, humidity, motion and battery charts for the sensor dashboard. `nodes` is the
-// page's sensor_node_latest rows: they give each node its name and colour, and the battery chart
-// its values. The readings come grouped by hour or day from report_sensor_chart (016). They
-// reload when the time range changes, whenever `refreshKey` changes (the page's Refresh button),
+// Temperature, humidity, motion and device alert charts for the sensor dashboard. `nodes` is the
+// page's sensor_node_latest rows: they give each node its name and colour. The readings come
+// grouped by hour or day from report_sensor_chart (016); the device alerts are counted from the
+// alerts raised in the same period (getDeviceAlertsInPeriod). They reload when the time range changes, whenever `refreshKey` changes (the page's Refresh button),
 // and when the page's automatic refresh brings a newer reading (the newest last_received_at in
 // `nodes` changes). Not on every automatic refresh: each reload makes the database group up to a
 // week of readings again, which is wasted when nothing new has arrived. Each load's period ends at
@@ -86,8 +90,10 @@ const ZERO_BAR_SIZE = 2
 // `onHourlyReadings` (optional, should be stable, e.g. a state setter) is called after each load
 // with { rows, now }: the hourly rows and the time the period ends, or null if they failed to
 // load. The page builds the node cards' sparklines from them, so they need no query of their own.
-export default function SensorCharts({ nodes, refreshKey, onHourlyReadings }) {
-  const { getChartReadings, getAlertThresholds } = useSensors()
+// `onThresholds` (optional, should be stable) is called once the alert limits load, with
+// getAlertThresholds' { data, error }. The node cards' gauges shade each node's limits from it.
+export default function SensorCharts({ nodes, refreshKey, onHourlyReadings, onThresholds }) {
+  const { getChartReadings, getDeviceAlertsInPeriod, getAlertThresholds } = useSensors()
   const [range, setRange] = useState('24h')
   // Kept with the range and refresh it was loaded for, so a new range shows as loading rather
   // than showing the previous range's charts
@@ -115,8 +121,9 @@ export default function SensorCharts({ nodes, refreshKey, onHourlyReadings }) {
     const hourly = getChartReadings({ ...span, bucket: 'hour' })
     const motion =
       period.motionBucket === 'hour' ? hourly : getChartReadings({ ...span, bucket: period.motionBucket })
+    const deviceAlerts = getDeviceAlertsInPeriod(span)
 
-    Promise.all([hourly, motion]).then(([hourlyResult, motionResult]) => {
+    Promise.all([hourly, motion, deviceAlerts]).then(([hourlyResult, motionResult, deviceAlertsResult]) => {
       if (cancelled) return
       onHourlyReadings?.(hourlyResult.error ? null : { rows: hourlyResult.data, now: period.to })
       setResult({
@@ -125,30 +132,40 @@ export default function SensorCharts({ nodes, refreshKey, onHourlyReadings }) {
         hourly: hourlyResult.data,
         motion: motionResult.data,
         error: hourlyResult.error ?? motionResult.error,
+        // Kept apart, so a failure here doesn't take the reading charts down with it
+        deviceAlerts: deviceAlertsResult.data,
+        deviceAlertsError: deviceAlertsResult.error,
       })
     })
     return () => {
       cancelled = true
     }
     // newestReceivedAt isn't read inside: it is only here to reload when new readings arrive
-  }, [range, refreshKey, newestReceivedAt, getChartReadings, onHourlyReadings])
+  }, [range, refreshKey, newestReceivedAt, getChartReadings, getDeviceAlertsInPeriod, onHourlyReadings])
 
   // Loaded once: alert limits rarely change
   useEffect(() => {
     let cancelled = false
     getAlertThresholds().then((nextResult) => {
-      if (!cancelled) setThresholds(nextResult)
+      if (cancelled) return
+      setThresholds(nextResult)
+      onThresholds?.(nextResult)
     })
     return () => {
       cancelled = true
     }
-  }, [getAlertThresholds])
+  }, [getAlertThresholds, onThresholds])
 
   const current = result?.key === requestKey ? result : null
   const seriesByNode = useMemo(
     () => nodeSeries(nodes, chartTokens.series, chartTokens.other),
     [nodes],
   )
+
+  const deviceAlertChart = useMemo(() => {
+    if (!current || current.deviceAlertsError) return null
+    return toDeviceAlertRows(current.deviceAlerts, seriesByNode, deviceCodeLabel)
+  }, [current, seriesByNode])
 
   const charts = useMemo(() => {
     if (!current || current.error) return null
@@ -163,10 +180,6 @@ export default function SensorCharts({ nodes, refreshKey, onHourlyReadings }) {
   }, [current, seriesByNode])
 
   const limits = limitsInfo(thresholds, nodes)
-  // The battery chart shows active nodes that have reported a level, and is left out when none
-  // have: the gateway doesn't send one (docs/iot/gateway-contract.md, section 3)
-  const activeNodes = nodes.filter((node) => node.is_active)
-  const batteryNodes = activeNodes.filter((node) => node.battery_level != null)
   const loading = !current
   const error = current?.error ?? null
 
@@ -228,15 +241,17 @@ export default function SensorCharts({ nodes, refreshKey, onHourlyReadings }) {
             max={100}
           />
         </Grid>
-        {/* Full width when there is no battery chart beside it */}
-        <Grid size={{ xs: 12, md: batteryNodes.length > 0 ? 6 : 12 }}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <MotionChart charts={charts} range={range} loading={loading} error={error} />
         </Grid>
-        {batteryNodes.length > 0 ? (
-          <Grid size={{ xs: 12, md: 6 }}>
-            <BatteryChart nodes={batteryNodes} missing={activeNodes.length - batteryNodes.length} />
-          </Grid>
-        ) : null}
+        <Grid size={{ xs: 12, md: 6 }}>
+          <DeviceAlertsChart
+            data={deviceAlertChart}
+            range={range}
+            loading={loading}
+            error={current?.deviceAlertsError ?? null}
+          />
+        </Grid>
       </Grid>
     </Stack>
   )
@@ -419,71 +434,114 @@ function MotionChart({ charts, range, loading, error }) {
   )
 }
 
-// The latest battery level of each active node, from the page's node list
-// `nodes`: the active nodes with a battery level, at least one. `missing`: how many active nodes
-// have none, left out of the chart.
-function BatteryChart({ nodes, missing }) {
-  const rows = nodes
-    .map((node) => {
-      const percent = Number(node.battery_level)
-      return { id: node.id, name: node.node_identifier, percent, level: batteryLevel(percent) }
-    })
-    .sort((a, b) => a.name.localeCompare(b.name))
-
-  const subtitle = [
-    `Active nodes. Below ${BATTERY_WARNING_PERCENT} % is getting low, below ${LOW_BATTERY_PERCENT} % is low.`,
-    missing > 0 ? `${missing} ${missing === 1 ? 'node has' : 'nodes have'} not reported a level.` : null,
-  ]
-    .filter(Boolean)
-    .join(' ')
+// Device alerts raised in the period (alerts with alert_type device_alert, acknowledged or not),
+// one horizontal bar per code, most raised first, stacked by node in the same colours as the other
+// charts. Each code's label has its count after it, so the total reads without hovering, and its
+// severity mark beside it. `data` is toDeviceAlertRows' { rows, series }, or null while loading or
+// if it failed.
+function DeviceAlertsChart({ data, range, loading, error }) {
+  const rows = data?.rows ?? []
+  const series = data?.series ?? []
+  const rowsByCode = new Map(rows.map((row) => [row.code, row]))
+  // Every code keeps a readable bar however many there are, up to all 16
+  const height = Math.max(DEVICE_ALERT_MIN_HEIGHT, rows.length * DEVICE_ALERT_ROW_HEIGHT + 64)
 
   return (
-    <ChartCard title="Battery level" subtitle={subtitle}>
-      <BarChart data={rows} layout="vertical" margin={{ top: 0, right: 48, left: 0, bottom: 0 }}>
-        {/* Every bar is labelled with its value, so the value axis would only repeat them */}
-        <XAxis type="number" hide domain={[0, 100]} />
+    <ChartCard
+      title="Device alerts"
+      subtitle={`Alerts raised by the nodes themselves, ${chartRanges[range].label.toLowerCase()}, by code and node. The mark by each code is its severity: ● critical, ▲ warning, ○ info.`}
+      loading={loading}
+      error={error}
+      empty={rows.length === 0}
+      emptyMessage="No device alerts in this period."
+      height={height}
+    >
+      <BarChart data={rows} layout="vertical" margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+        <CartesianGrid horizontal={false} stroke={chartTokens.grid} />
+        <XAxis type="number" allowDecimals={false} tick={tick} stroke={chartTokens.axis} />
         <YAxis
           type="category"
-          dataKey="name"
-          width={110}
-          tick={tick}
+          dataKey="code"
+          width={DEVICE_ALERT_AXIS_WIDTH}
           stroke={chartTokens.axis}
           tickLine={false}
+          interval={0}
+          tick={<DeviceCodeTick rowsByCode={rowsByCode} />}
         />
         <Tooltip
           {...tooltipStyle}
           cursor={{ fill: chartTokens.grid }}
-          formatter={(value) => `${formatPercent(value)} %`}
+          labelFormatter={(code) => {
+            const row = rowsByCode.get(code)
+            if (!row) return code
+            const severity = severityMarks[row.severity]?.label
+            return [row.label, severity ? `${severity} severity` : null, `${row.total} in total`]
+              .filter(Boolean)
+              .join(' · ')
+          }}
         />
-        <Bar
-          dataKey="percent"
-          name="Battery"
-          maxBarSize={36}
-          minPointSize={ZERO_BAR_SIZE}
-          radius={[0, chartTokens.barRadius, chartTokens.barRadius, 0]}
-        >
-          {rows.map((row) => (
-            <Cell key={row.id} fill={batteryColors[row.level]} />
+        <Legend {...legendProps} />
+        {/* Rounds only the end of each stack, whichever node is last */}
+        <BarStack radius={[0, chartTokens.barRadius, chartTokens.barRadius, 0]}>
+          {series.map((s) => (
+            <Bar
+              key={s.key}
+              dataKey={s.key}
+              name={s.name}
+              fill={s.color}
+              maxBarSize={24}
+              // A thin gap between stacked segments keeps neighbouring colours apart
+              stroke={tokens.surfaceWhite}
+              strokeWidth={1}
+            />
           ))}
-          {/* The level is written out too, so it never relies on colour alone */}
-          <LabelList
-            dataKey="percent"
-            position="right"
-            formatter={(value) =>
-              [`${formatPercent(value)} %`, batteryLevelLabels[batteryLevel(value)]]
-                .filter(Boolean)
-                .join(' · ')
-            }
-            fill={tokens.textPrimary}
-            fontSize={chartTokens.fontSize.label}
-            fontFamily={chartTokens.fontFamily}
-          />
-        </Bar>
+        </BarStack>
       </BarChart>
     </ChartCard>
   )
 }
 
-function formatPercent(value) {
-  return Number(value).toLocaleString('en-MY', { maximumFractionDigits: 0 })
+// A code's label on the Device alerts chart: "Critical fall · 3", with its severity mark between
+// the label and the bars. Recharts passes x and y (the tick's anchor, just left of the axis) and
+// payload.value (the code).
+function DeviceCodeTick({ x, y, payload, rowsByCode }) {
+  const row = rowsByCode.get(payload.value)
+  if (!row) return null
+  const mark = severityMarks[row.severity]
+
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text
+        x={-16}
+        dy="0.355em"
+        textAnchor="end"
+        fill={chartTokens.label}
+        fontSize={chartTokens.fontSize.tick}
+        fontFamily={chartTokens.fontFamily}
+      >
+        {row.label}
+        <tspan fill={tokens.textPrimary} fontWeight={600}>
+          {` · ${row.total}`}
+        </tspan>
+      </text>
+      {mark ? <SeverityMark mark={mark} cx={-6} /> : null}
+    </g>
+  )
+}
+
+// A severityMarks entry drawn about 8 px across, centred on (cx, 0)
+function SeverityMark({ mark, cx }) {
+  const r = 4
+  let shape = <circle cx={cx} cy={0} r={r} fill={mark.color} />
+  if (mark.shape === 'triangle') {
+    shape = <path d={`M${cx},${-r - 0.5} L${cx + r + 0.5},${r} L${cx - r - 0.5},${r} Z`} fill={mark.color} />
+  } else if (mark.shape === 'ring') {
+    shape = <circle cx={cx} cy={0} r={r - 0.75} fill="none" stroke={mark.color} strokeWidth={1.5} />
+  }
+  return (
+    <g>
+      <title>{`${mark.label} severity`}</title>
+      {shape}
+    </g>
+  )
 }

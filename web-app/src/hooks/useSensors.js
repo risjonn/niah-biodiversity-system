@@ -72,6 +72,7 @@ export function useSensors() {
     getRecentReadings,
     getRecentPositions,
     getChartReadings,
+    getDeviceAlertsInPeriod,
     getGlobalThresholds,
     getAlertThresholds,
   }
@@ -180,6 +181,31 @@ async function getChartReadings({ from, to, bucket }) {
       data: [],
       error: 'There are too many nodes to chart hourly for this period. Choose a shorter period.',
     }
+  }
+  return { data: rows, error: null }
+}
+
+// The device alerts (alert_type device_alert, 018) raised from `from` (inclusive) to `to`
+// (exclusive), ISO date-time strings, for the Device alerts chart. Only what the chart counts:
+// each alert's node, its code, and the code's severity from device_alert_codes (INFO, WARNING or
+// CRITICAL) as `device_alert_code.severity`. Acknowledged alerts are included: the chart is about
+// what happened in the period. Read-only; row-level security limits alerts to staff.
+async function getDeviceAlertsInPeriod({ from, to }) {
+  const { data, count, error } = await supabase
+    .from('alerts')
+    .select('sensor_node_id, alert_code, device_alert_code:device_alert_codes(severity)', {
+      // The total, to tell when the API's 1000-row limit has cut the result short
+      count: 'exact',
+    })
+    .eq('alert_type', 'device_alert')
+    .gte('created_at', from)
+    .lt('created_at', to)
+
+  if (error) return { data: [], error: sensorErrorMessage(error) }
+  const rows = data ?? []
+  // Partial counts would understate every code, so it is an error rather than a wrong chart
+  if (count != null && count > rows.length) {
+    return { data: [], error: 'There are too many device alerts in this period to chart them all.' }
   }
   return { data: rows, error: null }
 }
