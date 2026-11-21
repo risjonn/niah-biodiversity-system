@@ -3,20 +3,24 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 import { countResult, queryErrorMessage } from '../lib/queryHelpers'
 
-// Each alert comes with its node's identifier, and the name of whoever acknowledged it. Profiles
-// are only readable by their owner and by admins, so for a conservation officer the name is null
-// unless they acknowledged it themselves.
+// Each alert comes with its node's identifier and installed position, the name of whoever
+// acknowledged it, and for a device alert its code's meaning from device_alert_codes (018) as
+// `device_alert_code` (null for other alerts). Profiles are only readable by their owner and by
+// admins, so for a conservation officer the name is null unless they acknowledged it themselves.
 const ALERT_WITH_NODE =
-  '*, sensor_nodes(node_identifier), acknowledged_by_profile:profiles(full_name)'
+  '*, sensor_nodes(node_identifier, latitude, longitude), acknowledged_by_profile:profiles(full_name), device_alert_code:device_alert_codes(description)'
 
 // The same, plus the reading that raised the alert (alerts.sensor_reading_id, 009) as `reading`,
-// null for alerts without one. Read by alertReadingText in lib/alerts.js.
-const ALERT_WITH_READING = `${ALERT_WITH_NODE}, reading:sensor_readings(temperature, humidity, motion_duration_seconds)`
+// null for alerts without one. Read by alertReadingText and alertPosition in lib/alerts.js; the
+// GPS fix is for PLANT_STOLEN_MOVING and GPS_SHIELDED_OR_JAMMED alerts.
+const ALERT_WITH_READING = `${ALERT_WITH_NODE}, reading:sensor_readings(temperature, humidity, motion_duration_seconds, latitude, longitude)`
 
 // The acknowledged list is history, so only the most recent ones are loaded
 const ACKNOWLEDGED_ALERTS_LIMIT = 50
 
 const RECENT_READINGS_LIMIT = 20
+// How many of the node's latest GPS fixes the readings dialog lists
+const RECENT_POSITIONS_LIMIT = 10
 
 
 // Sensor nodes, their readings, alerts and alert limits for the sensor dashboard. Every function
@@ -66,14 +70,16 @@ export function useSensors() {
     countOpenAlerts,
     acknowledgeAlert,
     getRecentReadings,
+    getRecentPositions,
     getChartReadings,
     getGlobalThresholds,
     getAlertThresholds,
   }
 }
 
-// Every sensor node with its plant and latest reading, from the sensor_node_latest view (010).
-// Nodes without readings are included with the reading columns null.
+// Every sensor node with its plant and latest reading, from the sensor_node_latest view (010,
+// with the latest reading's device fields and GPS fix from 020). Nodes without readings are
+// included with the reading columns null.
 async function getNodeStatus() {
   const { data, error } = await supabase
     .from('sensor_node_latest')
@@ -130,6 +136,23 @@ async function getRecentReadings(nodeId) {
     .eq('sensor_node_id', nodeId)
     .order('recorded_at', { ascending: false })
     .limit(RECENT_READINGS_LIMIT)
+
+  if (error) return { data: [], error: sensorErrorMessage(error) }
+  return { data, error: null }
+}
+
+// The node's latest readings that have a GPS fix (latitude and longitude, 018), newest first by
+// the device's own time. Only some readings carry one, so this is its own query rather than the
+// GPS readings among getRecentReadings.
+async function getRecentPositions(nodeId) {
+  const { data, error } = await supabase
+    .from('sensor_readings')
+    .select('id, latitude, longitude, alert_status, recorded_at')
+    .eq('sensor_node_id', nodeId)
+    .not('latitude', 'is', null)
+    .not('longitude', 'is', null)
+    .order('recorded_at', { ascending: false })
+    .limit(RECENT_POSITIONS_LIMIT)
 
   if (error) return { data: [], error: sensorErrorMessage(error) }
   return { data, error: null }

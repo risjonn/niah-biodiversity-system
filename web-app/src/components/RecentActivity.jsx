@@ -24,10 +24,11 @@ import RelativeTime from './RelativeTime'
 import { usePlants } from '../hooks/usePlants'
 import { useSensors } from '../hooks/useSensors'
 import {
+  alertIcon,
+  alertLabel,
+  alertMeaning,
   alertReadingText,
-  alertTypeIcons,
-  alertTypeLabels,
-  DefaultAlertIcon,
+  isDeviceAlert,
   severityColors,
 } from '../lib/alerts'
 import { reviewStatusChipColors, reviewStatusLabels } from '../lib/reviewStatus'
@@ -173,8 +174,9 @@ function LatestRecords() {
   )
 }
 
-// The six newest alerts, open or acknowledged, with the reading that raised each one. Each links
-// to the sensors page, where alerts are acknowledged.
+// The six newest alerts, open or acknowledged, with the reading that raised each one. A device
+// alert shows its code's label, icon and meaning. Each links to the sensors page, where alerts
+// are acknowledged.
 function LatestAlerts() {
   const { getRecentAlerts } = useSensors()
   const [result, setResult] = useState(null)
@@ -199,9 +201,11 @@ function LatestAlerts() {
       {result && result.data.length > 0 ? (
         <List disablePadding>
           {result.data.map((alert) => {
-            const Icon = alertTypeIcons[alert.alert_type] ?? DefaultAlertIcon
             const color = severityColors[alert.severity] ?? 'primary'
             const reading = alertReadingText(alert)
+            // Threshold alerts' messages repeat the reading and node above, so only device
+            // alerts get a meaning line here
+            const meaning = isDeviceAlert(alert) ? alertMeaning(alert) : null
             return (
               <ListItemButton
                 key={alert.id}
@@ -219,13 +223,18 @@ function LatestAlerts() {
                       color: theme.palette[color].dark,
                     })}
                   >
-                    <Icon aria-hidden="true" />
+                    {alertIcon(alert, { 'aria-hidden': 'true' })}
                   </Avatar>
                 </ListItemAvatar>
                 <ListItemText
-                  primary={alertTypeLabels[alert.alert_type] ?? alert.alert_type}
+                  primary={alertLabel(alert)}
                   secondary={
                     <>
+                      {meaning ? (
+                        <Box component="span" sx={{ display: 'block' }}>
+                          {meaning}
+                        </Box>
+                      ) : null}
                       {[alert.sensor_nodes?.node_identifier ?? 'Unknown node', reading].filter(Boolean).join(' · ')}
                       {' · '}
                       <RelativeTime value={alert.created_at} now={result.loadedAt} longAges />

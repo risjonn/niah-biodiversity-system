@@ -163,6 +163,10 @@ export default function SensorCharts({ nodes, refreshKey, onHourlyReadings }) {
   }, [current, seriesByNode])
 
   const limits = limitsInfo(thresholds, nodes)
+  // The battery chart shows active nodes that have reported a level, and is left out when none
+  // have: the gateway doesn't send one (docs/iot/gateway-contract.md, section 3)
+  const activeNodes = nodes.filter((node) => node.is_active)
+  const batteryNodes = activeNodes.filter((node) => node.battery_level != null)
   const loading = !current
   const error = current?.error ?? null
 
@@ -224,12 +228,15 @@ export default function SensorCharts({ nodes, refreshKey, onHourlyReadings }) {
             max={100}
           />
         </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
+        {/* Full width when there is no battery chart beside it */}
+        <Grid size={{ xs: 12, md: batteryNodes.length > 0 ? 6 : 12 }}>
           <MotionChart charts={charts} range={range} loading={loading} error={error} />
         </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
-          <BatteryChart nodes={nodes} />
-        </Grid>
+        {batteryNodes.length > 0 ? (
+          <Grid size={{ xs: 12, md: 6 }}>
+            <BatteryChart nodes={batteryNodes} missing={activeNodes.length - batteryNodes.length} />
+          </Grid>
+        ) : null}
       </Grid>
     </Stack>
   )
@@ -413,16 +420,15 @@ function MotionChart({ charts, range, loading, error }) {
 }
 
 // The latest battery level of each active node, from the page's node list
-function BatteryChart({ nodes }) {
-  const active = nodes.filter((node) => node.is_active)
-  const rows = active
-    .filter((node) => node.battery_level != null)
+// `nodes`: the active nodes with a battery level, at least one. `missing`: how many active nodes
+// have none, left out of the chart.
+function BatteryChart({ nodes, missing }) {
+  const rows = nodes
     .map((node) => {
       const percent = Number(node.battery_level)
       return { id: node.id, name: node.node_identifier, percent, level: batteryLevel(percent) }
     })
     .sort((a, b) => a.name.localeCompare(b.name))
-  const missing = active.length - rows.length
 
   const subtitle = [
     `Active nodes. Below ${BATTERY_WARNING_PERCENT} % is getting low, below ${LOW_BATTERY_PERCENT} % is low.`,
@@ -432,12 +438,7 @@ function BatteryChart({ nodes }) {
     .join(' ')
 
   return (
-    <ChartCard
-      title="Battery level"
-      subtitle={subtitle}
-      empty={rows.length === 0}
-      emptyMessage="No active node has reported a battery level yet."
-    >
+    <ChartCard title="Battery level" subtitle={subtitle}>
       <BarChart data={rows} layout="vertical" margin={{ top: 0, right: 48, left: 0, bottom: 0 }}>
         {/* Every bar is labelled with its value, so the value axis would only repeat them */}
         <XAxis type="number" hide domain={[0, 100]} />
