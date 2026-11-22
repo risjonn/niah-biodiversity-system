@@ -9,15 +9,16 @@ import { usePlants } from '../hooks/usePlants'
 import { useSpecies } from '../hooks/useSpecies'
 import { theme } from '../theme/theme'
 
-// Scan a tag as a signed-in botanist. Says whether the tag is already registered, and if so its
+// Scan a tag as a signed-in user. Says whether the tag is already registered, and if so its
 // species and review status. Render it only while open, so its state starts fresh each time.
-// When the plant is the botanist's own and onViewRecord is given, the result has a "View record"
-// button that calls it with the full record.
+// When onViewRecord is given and the user may open the record, the result has a "View record"
+// button that calls it with the full record: for a botanist only their own plants, for
+// conservation officers and admins any plant (pending, approved or rejected, any recorder).
 export default function ScanTagModal({ onClose, onViewRecord }) {
   const lookUp = usePlantLookup()
-  const { fetchPlant } = usePlants()
-  // The scanned plant's full row when it is the botanist's own, else null
-  const [ownPlant, setOwnPlant] = useState(null)
+  const { fetchViewablePlant } = usePlants()
+  // The scanned plant's full row when the user may open it, else null
+  const [viewablePlant, setViewablePlant] = useState(null)
   const { fetchSpecies } = useSpecies()
   const [scanning, setScanning] = useState(true)
   // What the last scan found: { plant } or { message }; null while scanning
@@ -45,17 +46,17 @@ export default function ScanTagModal({ onClose, onViewRecord }) {
     setScanning(false)
     setChecking(true)
     const found = await lookUp(data)
-    // fetchPlant only returns the botanist's own rows, so finding it says the plant is theirs.
+    // fetchViewablePlant only returns rows the user may open (a botanist's own; any for staff).
     // A failure just leaves the button out.
-    const own = found.plant && onViewRecord ? await fetchPlant(found.plant.id) : null
-    setOwnPlant(own?.data ?? null)
+    const viewable = found.plant && onViewRecord ? await fetchViewablePlant(found.plant.id) : null
+    setViewablePlant(viewable?.data ?? null)
     setChecking(false)
     setResult(found)
   }
 
   function scanAnother() {
     setResult(null)
-    setOwnPlant(null)
+    setViewablePlant(null)
     scanLockedRef.current = false
     setScanning(true)
   }
@@ -92,9 +93,9 @@ export default function ScanTagModal({ onClose, onViewRecord }) {
             )}
           </View>
         ) : null}
-        {ownPlant ? <Button title="View record" onPress={() => onViewRecord(ownPlant)} /> : null}
+        {viewablePlant ? <Button title="View record" onPress={() => onViewRecord(viewablePlant)} /> : null}
         {result ? (
-          <Button title="Scan another" variant={ownPlant ? 'secondary' : 'primary'} onPress={scanAnother} />
+          <Button title="Scan another" variant={viewablePlant ? 'secondary' : 'primary'} onPress={scanAnother} />
         ) : null}
         <Button title="Close" variant="secondary" onPress={onClose} />
       </View>

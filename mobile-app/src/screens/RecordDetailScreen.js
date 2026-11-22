@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ActivityIndicator, Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native'
 import QRCode from 'react-native-qrcode-svg'
 import Button from '../components/Button'
 import ConservationStatusChip from '../components/ConservationStatusChip'
@@ -7,21 +7,25 @@ import EmptyState from '../components/EmptyState'
 import PhotoGallery from '../components/PhotoGallery'
 import ReviewStatusChip from '../components/ReviewStatusChip'
 import ScientificName from '../components/ScientificName'
+import { useAuth } from '../context/AuthContext'
 import { usePlantPhotos } from '../hooks/usePlantPhotos'
 import { usePlants } from '../hooks/usePlants'
 import { useSpecies } from '../hooks/useSpecies'
+import { openInMaps } from '../lib/maps'
+import { isStaffRole } from '../lib/roles'
 import { formatDateTime } from '../lib/sarawakTime'
 import { theme } from '../theme/theme'
 
 // Side length of the QR image, the same as after registering, big enough to scan from another phone
 const QR_CODE_SIZE = 200
 
-// One of the botanist's own records, read-only. Opened with { plantId } and, when the opener
-// already has it, the record itself as { plant }, which shows straight away (also offline) while
-// the latest copy loads.
+// A plant record, read-only: a botanist's own, or for conservation officers and admins any record
+// (opened from Scan tag). Opened with { plantId } and, when the opener already has it, the record
+// itself as { plant }, which shows straight away (also offline) while the latest copy loads.
 export default function RecordDetailScreen({ route, navigation }) {
   const { plantId, plant: initialPlant } = route.params ?? {}
-  const { fetchPlant } = usePlants()
+  const { role } = useAuth()
+  const { fetchViewablePlant } = usePlants()
   const { fetchSpecies } = useSpecies()
   const [plant, setPlant] = useState(initialPlant ?? null)
   const [species, setSpecies] = useState(null)
@@ -31,7 +35,7 @@ export default function RecordDetailScreen({ route, navigation }) {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([fetchPlant(plantId), fetchSpecies()]).then(([plantResult, speciesResult]) => {
+    Promise.all([fetchViewablePlant(plantId), fetchSpecies()]).then(([plantResult, speciesResult]) => {
       if (cancelled) return
       if (!plantResult.error && plantResult.data) setPlant(plantResult.data)
       else if (!plantResult.error) setError('This record could not be found.')
@@ -80,7 +84,8 @@ export default function RecordDetailScreen({ route, navigation }) {
         <View style={styles.rejection} accessibilityRole="summary">
           <Text style={styles.rejectionTitle}>Why it was rejected</Text>
           <Text style={styles.rejectionText}>
-            {plant.rejection_reason || 'No reason was given. Ask a conservation officer.'}
+            {plant.rejection_reason ||
+              (isStaffRole(role) ? 'No reason was given.' : 'No reason was given. Ask a conservation officer.')}
           </Text>
         </View>
       ) : null}
@@ -113,7 +118,7 @@ export default function RecordDetailScreen({ route, navigation }) {
               <Button
                 title="Open in Maps"
                 variant="secondary"
-                onPress={() => openInMaps(plant, scientificName)}
+                onPress={() => openInMaps(plant.latitude, plant.longitude, scientificName)}
               />
             </View>
           ) : null}
@@ -174,22 +179,6 @@ function Detail({ label, value, last = false }) {
 function formatCoordinates(plant) {
   if (plant.latitude == null || plant.longitude == null) return 'Not recorded'
   return `${Number(plant.latitude).toFixed(5)}, ${Number(plant.longitude).toFixed(5)}`
-}
-
-// Opens the phone's own maps app with a pin at the plant: Apple Maps on iOS, the geo: handler
-// (usually Google Maps) on Android. Falls back to Google Maps in the browser if that can't open.
-async function openInMaps(plant, label) {
-  const position = `${plant.latitude},${plant.longitude}`
-  const name = encodeURIComponent(label ?? 'Plant')
-  const url = Platform.select({
-    ios: `maps://?ll=${position}&q=${name}`,
-    default: `geo:${position}?q=${position}(${name})`,
-  })
-  try {
-    await Linking.openURL(url)
-  } catch {
-    await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${position}`).catch(() => {})
-  }
 }
 
 const styles = StyleSheet.create({
