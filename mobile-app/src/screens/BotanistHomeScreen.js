@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import EmptyState from '../components/EmptyState'
 import HeaderBand from '../components/HeaderBand'
+import OfflineBanner from '../components/OfflineBanner'
 import PlantThumbnail from '../components/PlantThumbnail'
 import ReviewStatusChip from '../components/ReviewStatusChip'
 import ScanTagModal from '../components/ScanTagModal'
@@ -13,7 +14,9 @@ import { useAuth } from '../context/AuthContext'
 import { useSync } from '../context/SyncContext'
 import { countPlantPhotos } from '../hooks/usePlantPhoto'
 import { usePlants } from '../hooks/usePlants'
+import { useReconnect } from '../hooks/useReconnect'
 import { useSpecies } from '../hooks/useSpecies'
+import { queuedRecordAsPlant } from '../lib/queuedRecord'
 import { reviewStatuses, reviewStatusLabels, reviewStatusShortLabels } from '../lib/reviewStatus'
 import { isStaffRole, roleLabels } from '../lib/roles'
 import { formatLongDate, formatRelativeTime, greetingFor } from '../lib/sarawakTime'
@@ -32,8 +35,10 @@ export default function BotanistHomeScreen({ navigation }) {
   const { fullName, role } = useAuth()
   const { fetchMyPlants } = usePlants()
   const { fetchSpecies } = useSpecies()
-  const { syncedVersion } = useSync()
-  // { plants, speciesById } once loaded; kept while reloading so the screen doesn't blank out
+  const { records, syncedVersion } = useSync()
+  // { plants, speciesById, offline, savedAt } once loaded; kept while reloading so the screen
+  // doesn't blank out. Offline, plants are the ones saved on the phone (savedAt is when they
+  // loaded), or none (savedAt null) if nothing was saved.
   const [data, setData] = useState(null)
   // How many photos each recent record has, by plant id
   const [photoCounts, setPhotoCounts] = useState({})
@@ -47,9 +52,10 @@ export default function BotanistHomeScreen({ navigation }) {
   async function load() {
     // The species list falls back to the copy saved on the phone when offline, so names still
     // show; without it the records just read "Unknown species"
+    // Both give up after LOAD_TIMEOUT_MS, so the skeletons never stay up for long
     const [plantsResult, speciesResult] = await Promise.all([fetchMyPlants(), fetchSpecies()])
     setNow(Date.now())
-    if (plantsResult.error) {
+    if (plantsResult.error && !plantsResult.offline) {
       setError(plantsResult.error)
       return
     }
@@ -57,7 +63,10 @@ export default function BotanistHomeScreen({ navigation }) {
     setData({
       plants: plantsResult.data,
       speciesById: new Map(speciesResult.data.map((species) => [species.id, species])),
+      offline: plantsResult.offline,
+      savedAt: plantsResult.savedAt ?? null,
     })
+    if (plantsResult.offline) return
     // The "+2" badges for the recent records, from one batched count; covers show without them
     const counts = await countPlantPhotos(
       plantsResult.data.slice(0, RECENT_COUNT).map((plant) => plant.id),
@@ -82,6 +91,9 @@ export default function BotanistHomeScreen({ navigation }) {
     if (syncedVersion !== firstSyncedVersion.current) loadRef.current()
   }, [syncedVersion])
 
+  // Back online: replace the saved data with the server's
+  useReconnect(() => loadRef.current())
+
   async function handleRefresh() {
     setRefreshing(true)
     await load()
@@ -90,10 +102,26 @@ export default function BotanistHomeScreen({ navigation }) {
 
   const firstName = fullName?.trim().split(/\s+/)[0]
   const greeting = greetingFor(now)
-  const plants = data?.plants ?? []
+  // Records on the phone count too, as in Records: those waiting to sync (pending review once
+  // saved), and synced ones the server list doesn't have yet (e.g. offline)
+  const unsynced = records.filter((record) => record.status !== 'synced')
+  const unsyncedIds = new Set(unsynced.map((record) => record.id))
+  const serverPlants = (data?.plants ?? []).filter((plant) => !unsyncedIds.has(plant.id))
+  const serverIds = new Set(serverPlants.map((plant) => plant.id))
+  const plants = [
+    ...records
+      .filter((record) => record.status === 'synced' && !serverIds.has(record.id))
+      .map(queuedRecordAsPlant),
+    ...serverPlants,
+  ].sort(byNewest)
   const counts = Object.fromEntries(
     reviewStatuses.map((status) => [status, plants.filter((plant) => plant.review_status === status).length]),
   )
+  counts.pending_review += unsynced.length
+
+  const offline = data?.offline === true
+  // Offline with nothing saved on the phone and nothing queued: nothing to show at all
+  const offlineEmpty = offline && !data.savedAt && plants.length === 0 && unsynced.length === 0
 
   return (
     <ScrollView
@@ -121,8 +149,12 @@ export default function BotanistHomeScreen({ navigation }) {
       </HeaderBand>
 
       <View style={styles.content}>
+        {offline && !offlineEmpty ? (
+          <OfflineBanner savedAt={data.savedAt} onRetry={handleRefresh} retrying={refreshing} />
+        ) : null}
+
         {/* Counts of the botanist's own records; each opens Records filtered to that status */}
-        {data ? (
+        {data && !offlineEmpty ? (
           <View style={styles.summaryRow}>
             {reviewStatuses.map((status) => (
               <SummaryTile
@@ -133,7 +165,7 @@ export default function BotanistHomeScreen({ navigation }) {
               />
             ))}
           </View>
-        ) : !error ? (
+        ) : !data && !error ? (
           <SkeletonGroup label="Loading your record counts" style={styles.summaryRow}>
             {reviewStatuses.map((status) => (
               <View key={status} style={styles.summarySkeleton}>
@@ -195,14 +227,36 @@ export default function BotanistHomeScreen({ navigation }) {
               Couldn&apos;t refresh: {error}
             </Text>
           ) : null}
-          {data && plants.length === 0 ? (
+          {unsynced.length > 0 ? (
+            <Pressable
+              onPress={() => navigation.navigate('MyRecords')}
+              accessibilityRole="button"
+              accessibilityHint="Opens My Records"
+              style={({ pressed }) => [styles.queueNote, pressed && styles.pressed]}
+            >
+              <Ionicons name="cloud-upload-outline" size={20} color={theme.colors.primary} />
+              <Text style={styles.queueNoteText}>
+                {unsynced.length === 1 ? '1 record' : `${unsynced.length} records`} waiting to sync
+                {offline ? " when you're back online" : ''}
+              </Text>
+              <Ionicons name="chevron-forward" size={20} color={theme.colors.textSecondary} />
+            </Pressable>
+          ) : null}
+          {offlineEmpty ? (
+            <EmptyState
+              icon="cloud-offline-outline"
+              message="You're offline. You can still register plants; they'll sync when you're back online."
+              action={{ title: 'Register a plant', onPress: () => navigation.navigate('FieldRegistration') }}
+            />
+          ) : null}
+          {data && !offlineEmpty && plants.length === 0 && unsynced.length === 0 ? (
             <EmptyState
               icon="leaf-outline"
               message="You haven't registered any plants yet. Your records will show here."
               action={{ title: 'Register a plant', onPress: () => navigation.navigate('FieldRegistration') }}
             />
           ) : null}
-          {plants.length > 0 ? (
+          {data && plants.length > 0 ? (
             <View style={styles.card}>
               {plants.slice(0, RECENT_COUNT).map((plant, index) => (
                 <RecentRecord
@@ -265,7 +319,16 @@ function Tile({ icon, label, onPress }) {
   )
 }
 
-function RecentRecord({ plant, photoCount, species, now, first, onPress }) {
+function byNewest(a, b) {
+  return new Date(b.recorded_at) - new Date(a.recorded_at)
+}
+
+function RecentRecord({ plant, photoCount, species: listedSpecies, now, first, onPress }) {
+  // A record from the queue carries the species name it was saved with, for when the species list
+  // isn't on the phone
+  const species =
+    listedSpecies ??
+    (plant.species_scientific_name ? { scientific_name: plant.species_scientific_name } : undefined)
   const name = species?.scientific_name ?? 'Unknown species'
   const ago = formatRelativeTime(plant.recorded_at, now)
   const photos = photoCount > 1 ? `, ${photoCount} photos` : ''
@@ -432,6 +495,24 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
     fontSize: theme.typography.bodySmall.fontSize,
     color: theme.colors.primary,
+  },
+  queueNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.md,
+    minHeight: theme.buttonHeight,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    borderRadius: theme.radius,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surfaceWhite,
+  },
+  queueNoteText: {
+    flex: 1,
+    fontFamily: 'Inter_500Medium',
+    fontSize: theme.typography.bodySmall.fontSize,
+    color: theme.colors.textPrimary,
   },
   staleNote: {
     fontFamily: 'Inter_400Regular',

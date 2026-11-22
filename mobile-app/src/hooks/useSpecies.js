@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { requestOnline } from '../lib/network'
 import { supabase } from '../lib/supabaseClient'
 
 // The last species list that loaded, so botanists can still register plants offline and guests
@@ -28,23 +29,30 @@ async function fetchSpeciesPhotos(speciesId) {
 }
 
 // Every species, alphabetical by scientific name, with the details guest mode shows. Species are
-// public, so this works signed in or as a guest.
+// public, so this works signed in or as a guest. `offline` is true when the server couldn't be
+// reached (no connection, or no answer within LOAD_TIMEOUT_MS) and the saved list, if any, was
+// used instead.
 async function fetchSpecies() {
-  const { data, error } = await supabase
-    .from('species')
-    .select(
-      'id, scientific_name, common_name, family, description, conservation_status, cultural_significance, reference_photo_url',
-    )
-    .order('scientific_name')
+  const response = await requestOnline(() =>
+    supabase
+      .from('species')
+      .select(
+        'id, scientific_name, common_name, family, description, conservation_status, cultural_significance, reference_photo_url',
+      )
+      .order('scientific_name'),
+  )
+  // No answer counts the same as a request that never reached the database
+  const { data, error } = response ?? { data: null, error: { code: '' } }
 
   if (!error) {
     await saveSpecies(data)
-    return { data, error: null, savedAt: null }
+    return { data, error: null, savedAt: null, offline: false }
   }
 
+  const offline = !error.code
   const saved = await readSavedSpecies()
-  if (saved) return { data: saved.species, error: null, savedAt: saved.savedAt }
-  return { data: [], error: speciesErrorMessage(error), savedAt: null }
+  if (saved) return { data: saved.species, error: null, savedAt: saved.savedAt, offline }
+  return { data: [], error: speciesErrorMessage(error), savedAt: null, offline }
 }
 
 async function saveSpecies(species) {

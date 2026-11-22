@@ -6,6 +6,7 @@ import {
   isAuthRetryableFetchError,
   isAuthSessionMissingError,
 } from "@supabase/supabase-js";
+import { forgetSavedPlants } from "../lib/plantCache";
 import { supabase } from "../lib/supabaseClient";
 
 // Matches the user_role enum in database/schema/001_initial_schema.sql
@@ -286,8 +287,13 @@ function saveAccount(account) {
   );
 }
 
+// Also removes the records saved for offline viewing, so they don't stay on the phone after
+// sign-out
 function forgetSavedAccount() {
-  return AsyncStorage.removeItem(SAVED_ACCOUNT_KEY).catch(() => {});
+  return Promise.all([
+    AsyncStorage.removeItem(SAVED_ACCOUNT_KEY).catch(() => {}),
+    forgetSavedPlants(),
+  ]);
 }
 
 function signInErrorMessage(error) {

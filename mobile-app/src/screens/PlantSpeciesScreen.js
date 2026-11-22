@@ -5,10 +5,12 @@ import Ionicons from '@expo/vector-icons/Ionicons'
 import ConservationStatusChip from '../components/ConservationStatusChip'
 import EmptyState from '../components/EmptyState'
 import FilterChip from '../components/FilterChip'
+import OfflineBanner from '../components/OfflineBanner'
 import PlantThumbnail from '../components/PlantThumbnail'
 import ScientificName from '../components/ScientificName'
 import SkeletonRows from '../components/Skeleton'
 import TextInput from '../components/TextInput'
+import { useReconnect } from '../hooks/useReconnect'
 import { useSpecies } from '../hooks/useSpecies'
 import { conservationStatusLabels, conservationStatuses } from '../lib/conservationStatus'
 import { formatDateTime } from '../lib/sarawakTime'
@@ -18,8 +20,10 @@ import { theme } from '../theme/theme'
 // many of the search's matches have it), pull to refresh. A species opens its detail screen.
 export default function PlantSpeciesScreen({ navigation }) {
   const { fetchSpecies } = useSpecies()
-  // { data, savedAt } once loaded; kept while reloading
+  // { data, savedAt, offline } once loaded; kept while reloading. offline: the server couldn't be
+  // reached and this is the list saved on the phone (savedAt is when it was downloaded).
   const [result, setResult] = useState(null)
+  // { message, offline } when the last load failed with no saved list to fall back on
   const [error, setError] = useState(null)
   const [refreshing, setRefreshing] = useState(false)
   const [search, setSearch] = useState('')
@@ -27,13 +31,16 @@ export default function PlantSpeciesScreen({ navigation }) {
   const [status, setStatus] = useState('')
 
   async function loadSpecies() {
+    // Gives up after LOAD_TIMEOUT_MS, so the skeletons never stay up for long
     const nextResult = await fetchSpecies()
     if (nextResult.error) {
-      setError(nextResult.error)
+      setError({ message: nextResult.error, offline: nextResult.offline })
+      // A list already on screen stays, marked as offline
+      if (nextResult.offline) setResult((current) => current && { ...current, offline: true })
       return
     }
     setError(null)
-    setResult({ data: nextResult.data, savedAt: nextResult.savedAt })
+    setResult({ data: nextResult.data, savedAt: nextResult.savedAt, offline: nextResult.offline })
   }
 
   // The focus effect always calls the latest loadSpecies
@@ -48,6 +55,9 @@ export default function PlantSpeciesScreen({ navigation }) {
       loadRef.current()
     }, []),
   )
+
+  // Back online: replace the saved list with the server's
+  useReconnect(() => loadRef.current())
 
   async function handleRefresh() {
     setRefreshing(true)
@@ -114,21 +124,28 @@ export default function PlantSpeciesScreen({ navigation }) {
         ))}
       </View>
 
-      {result?.savedAt ? (
-        <Text style={styles.note}>
-          Offline: showing the list saved on {formatDateTime(result.savedAt)}.
-        </Text>
+      {result?.offline ? (
+        <OfflineBanner savedAt={result.savedAt} onRetry={handleRefresh} retrying={refreshing} />
+      ) : result?.savedAt ? (
+        // The server answered with an error, so the saved list stands in
+        <Text style={styles.note}>Showing the list saved on {formatDateTime(result.savedAt)}.</Text>
       ) : null}
 
       {!result && !error ? <SkeletonRows count={5} label="Loading plant species" /> : null}
       {error && !result ? (
         <EmptyState
           icon="cloud-offline-outline"
-          message={error}
+          message={
+            error.offline
+              ? "You're offline. The species list will download when you're back online."
+              : error.message
+          }
           action={{ title: 'Try again', onPress: handleRefresh }}
         />
       ) : null}
-      {error && result ? <Text style={styles.note}>Couldn&apos;t refresh: {error}</Text> : null}
+      {error && result && !result.offline ? (
+        <Text style={styles.note}>Couldn&apos;t refresh: {error.message}</Text>
+      ) : null}
 
       {result && shown.length === 0 ? (
         <EmptyState

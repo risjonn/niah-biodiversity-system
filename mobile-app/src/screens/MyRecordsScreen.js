@@ -5,6 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons'
 import Button from '../components/Button'
 import EmptyState from '../components/EmptyState'
 import FilterChip from '../components/FilterChip'
+import OfflineBanner from '../components/OfflineBanner'
 import PlantThumbnail from '../components/PlantThumbnail'
 import ReviewStatusChip from '../components/ReviewStatusChip'
 import ScientificName from '../components/ScientificName'
@@ -13,6 +14,7 @@ import SyncStatusChip from '../components/SyncStatusChip'
 import { useSync } from '../context/SyncContext'
 import { countPlantPhotos } from '../hooks/usePlantPhoto'
 import { usePlants } from '../hooks/usePlants'
+import { useReconnect } from '../hooks/useReconnect'
 import { useSpecies } from '../hooks/useSpecies'
 import { queuedCoverUri, queuedRecordAsPlant } from '../lib/queuedRecord'
 import { reviewStatuses, reviewStatusShortLabels } from '../lib/reviewStatus'
@@ -50,8 +52,11 @@ export default function MyRecordsScreen({ navigation, route }) {
   // True until the server records have loaded once
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  // { message, offline } when the server records couldn't be loaded
+  // { message } when the server refused to load the records
   const [error, setError] = useState(null)
+  // { savedAt } when the server couldn't be reached and `plants` are the ones saved on the phone
+  // (savedAt null if none were saved)
+  const [offline, setOffline] = useState(null)
   const [syncMessage, setSyncMessage] = useState(null)
   // Records being retried or discarded, so their buttons can't be pressed twice
   const [busyIds, setBusyIds] = useState([])
@@ -75,19 +80,22 @@ export default function MyRecordsScreen({ navigation, route }) {
 
   async function loadRecords() {
     setError(null)
+    // Both give up after LOAD_TIMEOUT_MS, so the skeletons never stay up for long. Offline, the
+    // records saved on the phone come back instead.
     const [plantsResult, speciesResult] = await Promise.all([fetchMyPlants(), fetchSpecies()])
     setNow(Date.now())
-    if (plantsResult.error) {
-      setError({ message: plantsResult.error, offline: !plantsResult.code })
+    if (plantsResult.error && !plantsResult.offline) {
+      setError({ message: plantsResult.error })
     } else {
       setPlants(plantsResult.data)
       // The species list falls back to the copy saved on the phone; without it names read
       // "Unknown species"
       setSpeciesById(new Map(speciesResult.data.map((species) => [species.id, species])))
     }
+    setOffline(plantsResult.offline ? { savedAt: plantsResult.savedAt ?? null } : null)
     setLoading(false)
     // The badges come after the list, from one batched count; without them the covers still show
-    if (!plantsResult.error) {
+    if (!plantsResult.error && !plantsResult.offline) {
       const counts = await countPlantPhotos(plantsResult.data.map((plant) => plant.id))
       setPhotoCounts(counts.data)
     }
@@ -111,6 +119,9 @@ export default function MyRecordsScreen({ navigation, route }) {
   useEffect(() => {
     if (syncedVersion !== openedAtSyncedVersion.current) loadRef.current()
   }, [syncedVersion])
+
+  // Back online: replace the saved records with the server's
+  useReconnect(() => loadRef.current())
 
   async function handleRefresh() {
     setRefreshing(true)
@@ -218,6 +229,8 @@ export default function MyRecordsScreen({ navigation, route }) {
   }
 
   const hasAnything = allRecords.length > 0 || unsynced.length > 0
+  // Offline with no records saved on the phone and none queued
+  const offlineEmpty = offline !== null && !offline.savedAt && !hasAnything
 
   return (
     <ScrollView
@@ -232,6 +245,10 @@ export default function MyRecordsScreen({ navigation, route }) {
         />
       }
     >
+      {offline && !offlineEmpty ? (
+        <OfflineBanner savedAt={offline.savedAt} onRetry={handleRefresh} retrying={refreshing} />
+      ) : null}
+
       <View style={styles.chips} accessibilityLabel="Filter by review status">
         {FILTERS.map((value) => (
           <FilterChip
@@ -282,16 +299,20 @@ export default function MyRecordsScreen({ navigation, route }) {
       ) : null}
       {error && hasAnything ? (
         <View style={styles.errorNote}>
-          <Text style={styles.note}>
-            {error.offline
-              ? "Your synced records can't be updated while you're offline."
-              : error.message}
-          </Text>
+          <Text style={styles.note}>{error.message}</Text>
           <Button title="Try again" variant="secondary" onPress={handleRefresh} />
         </View>
       ) : null}
 
-      {!loading && !error && shown.length === 0 && !showQueue ? (
+      {offlineEmpty ? (
+        <EmptyState
+          icon="cloud-offline-outline"
+          message="You're offline. You can still register plants; they'll sync when you're back online."
+          action={{ title: 'Register a plant', onPress: () => navigation.navigate('FieldRegistration') }}
+        />
+      ) : null}
+
+      {!loading && !error && !offlineEmpty && shown.length === 0 && !showQueue ? (
         <EmptyState
           icon={filter === 'rejected' ? 'checkmark-circle-outline' : 'leaf-outline'}
           message={EMPTY_MESSAGES[filter]}
