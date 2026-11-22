@@ -23,6 +23,9 @@ export function AuthProvider({ children }) {
   // Kept with the user it was loaded for, so one user's profile never carries over to the next
   const [loadedProfile, setLoadedProfile] = useState(null);
   const [error, setError] = useState(null);
+  // Whether anyone has had a session since this page loaded. ProtectedRoute uses it to tell a
+  // deep link from a sign-out. Kept in memory only, so a fresh page load starts as false.
+  const [signedInThisVisit, setSignedInThisVisit] = useState(false);
 
   useEffect(() => {
     // Fires INITIAL_SESSION straight away with the saved session (or null), then again on
@@ -31,6 +34,7 @@ export function AuthProvider({ children }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
+      if (nextSession) setSignedInThisVisit(true);
       if (!nextSession) setLoadedProfile(null);
     });
     return () => subscription.unsubscribe();
@@ -137,6 +141,7 @@ export function AuthProvider({ children }) {
     isLoading: session === undefined || (userId !== null && !profileLoaded),
     // Why the last sign-in attempt failed, or why the user was signed out
     error,
+    signedInThisVisit,
     signIn,
     signOut,
     changePassword,
