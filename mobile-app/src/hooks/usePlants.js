@@ -1,4 +1,5 @@
 import { useAuth } from '../context/AuthContext'
+import { isStaffRole } from '../lib/roles'
 import { supabase } from '../lib/supabaseClient'
 
 // Plant records for the signed-in user. Every function resolves to { data, error } and never
@@ -7,7 +8,7 @@ import { supabase } from '../lib/supabaseClient'
 // PostgREST `code` ('' when the request never reached the database) and HTTP `status`, for
 // callers such as the sync queue that need to tell a lost connection from a refused record.
 export function usePlants() {
-  const { user } = useAuth()
+  const { user, role } = useAuth()
   const userId = user?.id ?? null
 
   // Saves a new plant and returns the inserted row, including the qr_code the database generates.
@@ -72,6 +73,18 @@ export function usePlants() {
     return { data, error: null }
   }
 
+  // A plant the signed-in user may open in Record detail, or null as data if there is none.
+  // Conservation officers and admins can read every plant whatever its status or recorder
+  // (plants_select_officer_admin, 001), so for them any plant; for botanists only their own, the
+  // same as fetchPlant.
+  async function fetchViewablePlant(id) {
+    if (!isStaffRole(role)) return fetchPlant(id)
+
+    const { data, error } = await supabase.from('plants').select('*').eq('id', id).maybeSingle()
+    if (error) return { data: null, ...plantError(error) }
+    return { data, error: null }
+  }
+
   // The signed-in user's own submissions, newest first, whatever their review status
   async function fetchMyPlants() {
     if (!userId) {
@@ -96,7 +109,7 @@ export function usePlants() {
     return userId && lastLoadedMyPlants?.userId === userId ? lastLoadedMyPlants.plants : null
   }
 
-  return { submitPlant, fetchPlant, fetchMyPlants, getLoadedMyPlants }
+  return { submitPlant, fetchPlant, fetchViewablePlant, fetchMyPlants, getLoadedMyPlants }
 }
 
 // Kept with the user it belongs to, so it never shows one user's records to the next

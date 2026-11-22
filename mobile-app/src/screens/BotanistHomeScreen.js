@@ -15,6 +15,7 @@ import { countPlantPhotos } from '../hooks/usePlantPhoto'
 import { usePlants } from '../hooks/usePlants'
 import { useSpecies } from '../hooks/useSpecies'
 import { reviewStatuses, reviewStatusLabels, reviewStatusShortLabels } from '../lib/reviewStatus'
+import { isStaffRole, roleLabels } from '../lib/roles'
 import { formatLongDate, formatRelativeTime, greetingFor } from '../lib/sarawakTime'
 import { theme } from '../theme/theme'
 
@@ -23,11 +24,12 @@ const THUMBNAIL_SIZE = 56
 // The status count tiles, and their loading placeholders, so nothing moves when they load
 const SUMMARY_TILE_HEIGHT = 96
 
-// The botanist's start screen: a greeting, counts of their own records by review status, shortcuts
-// and their latest records. It reloads whenever it comes back into view (e.g. after registering a
+// The field app's start screen (every role): a greeting, counts of the user's own records by
+// review status, shortcuts and their latest records. Conservation officers and admins also see
+// their role as a chip on the band. It reloads whenever it comes back into view (e.g. after registering a
 // plant) and when queued records finish syncing, and on pull to refresh.
 export default function BotanistHomeScreen({ navigation }) {
-  const { fullName } = useAuth()
+  const { fullName, role } = useAuth()
   const { fetchMyPlants } = usePlants()
   const { fetchSpecies } = useSpecies()
   const { syncedVersion } = useSync()
@@ -110,7 +112,13 @@ export default function BotanistHomeScreen({ navigation }) {
         safeTop
         title={firstName ? `${greeting}, ${firstName}` : greeting}
         subtitle={formatLongDate(now)}
-      />
+      >
+        {isStaffRole(role) ? (
+          <View style={styles.roleChip}>
+            <Text style={styles.roleChipText}>{roleLabels[role]}</Text>
+          </View>
+        ) : null}
+      </HeaderBand>
 
       <View style={styles.content}>
         {/* Counts of the botanist's own records; each opens Records filtered to that status */}
@@ -302,6 +310,20 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.8,
+  },
+  // White on the primary band, with the primary colour as text (about 6.9:1)
+  roleChip: {
+    alignSelf: 'flex-start',
+    marginTop: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.xs,
+    borderRadius: theme.radius * 2,
+    backgroundColor: theme.colors.surfaceWhite,
+  },
+  roleChipText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: theme.typography.caption.fontSize,
+    color: theme.colors.primary,
   },
 
   summaryRow: {

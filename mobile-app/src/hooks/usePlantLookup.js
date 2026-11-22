@@ -5,8 +5,10 @@ import { QR_CODE_PATTERN, normaliseQrCode } from '../lib/qrCode'
 // Not the same as "Not registered yet": offline must not look like a new tag
 const LOOKUP_FAILED = { message: "Couldn't check this tag. Connect to the internet and try again." }
 
-// Botanist lookup. Botanists can only read their own rows in plants (database/schema/005), so
+// Signed-in lookup. Botanists can only read their own rows in plants (database/schema/005), so
 // approved records from any botanist come from plants_public and the rest from plants.
+// Conservation officers and admins can read every row in plants (001), so for them the second
+// query finds any pending or rejected plant too.
 // Resolves to { plant: { id, qr_code, species_id, review_status } } or { message }.
 export function usePlantLookup() {
   return useCallback(async (rawCode) => {
