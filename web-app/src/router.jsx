@@ -4,6 +4,7 @@ import RoleHomeRedirect from './components/RoleHomeRedirect'
 import AuthLayout from './layouts/AuthLayout'
 import AppLayout from './layouts/AppLayout'
 import Login from './pages/Login'
+import { pageRolesByPath } from './lib/roles'
 // Lazy-loaded, see lazyPages.js
 import {
   Dashboard,
@@ -44,7 +45,7 @@ export const router = createBrowserRouter([
         // Only admins can manage users and assign roles
         path: '/users',
         element: (
-          <ProtectedRoute allowedRoles={['admin']}>
+          <ProtectedRoute allowedRoles={pageRolesByPath['/users']}>
             <UserManagement />
           </ProtectedRoute>
         ),

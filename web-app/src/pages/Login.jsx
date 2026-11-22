@@ -12,7 +12,7 @@ import {
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import { useAuth } from '../context/AuthContext'
-import { homePathByRole } from '../lib/roles'
+import { homePathByRole, signInDestination } from '../lib/roles'
 
 export default function Login() {
   const { role, isLoading, error, signIn } = useAuth()
@@ -24,11 +24,10 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const [capsLockOn, setCapsLockOn] = useState(false)
 
-  // Signed in with web access: go back to the page they were sent here from, or their home
-  const home = homePathByRole[role]
-  if (home) {
-    const from = location.state?.from
-    return <Navigate to={from ? `${from.pathname}${from.search}` : home} replace />
+  // Signed in with web access. `from` is only set when a signed-out visitor opened a page directly
+  // (see ProtectedRoute), never after a sign-out, so signing in here otherwise starts at home.
+  if (homePathByRole[role]) {
+    return <Navigate to={signInDestination(role, location.state?.from)} replace />
   }
 
   async function handleSubmit(event) {
