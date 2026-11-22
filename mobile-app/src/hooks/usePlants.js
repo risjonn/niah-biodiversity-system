@@ -1,4 +1,6 @@
 import { useAuth } from '../context/AuthContext'
+import { requestOnline } from '../lib/network'
+import { readSavedPlants, savePlants } from '../lib/plantCache'
 import { isStaffRole } from '../lib/roles'
 import { supabase } from '../lib/supabaseClient'
 
@@ -85,21 +87,36 @@ export function usePlants() {
     return { data, error: null }
   }
 
-  // The signed-in user's own submissions, newest first, whatever their review status
+  // The signed-in user's own submissions, newest first, whatever their review status. `offline` is
+  // true when the server couldn't be reached (no connection, or no answer within
+  // LOAD_TIMEOUT_MS): `data` is then the list loaded earlier this session or saved on the phone,
+  // with `savedAt` the ISO time it was loaded, or [] with an error when there is neither.
   async function fetchMyPlants() {
     if (!userId) {
-      return { data: [], error: 'You need to be signed in to see your plant records.' }
+      return { data: [], error: 'You need to be signed in to see your plant records.', offline: false }
     }
 
-    const { data, error } = await supabase
-      .from('plants')
-      .select('*')
-      .eq('recorded_by', userId)
-      .order('recorded_at', { ascending: false })
+    const response = await requestOnline(() =>
+      supabase
+        .from('plants')
+        .select('*')
+        .eq('recorded_by', userId)
+        .order('recorded_at', { ascending: false }),
+    )
 
-    if (error) return { data: [], ...plantError(error) }
-    lastLoadedMyPlants = { userId, plants: data }
-    return { data, error: null }
+    if (response && !response.error) {
+      const savedAt = new Date().toISOString()
+      lastLoadedMyPlants = { userId, plants: response.data, savedAt }
+      savePlants(userId, response.data, savedAt)
+      return { data: response.data, error: null, offline: false }
+    }
+    // Refused by the server (not a lost connection): nothing saved stands in for that
+    if (response?.error.code) return { data: [], ...plantError(response.error), offline: false }
+
+    const saved =
+      lastLoadedMyPlants?.userId === userId ? lastLoadedMyPlants : await readSavedPlants(userId)
+    if (saved) return { data: saved.plants, error: null, offline: true, savedAt: saved.savedAt }
+    return { data: [], error: OFFLINE_MESSAGE, code: '', offline: true }
   }
 
   // The signed-in user's records from the last fetchMyPlants this session (Home and Records load
@@ -114,6 +131,8 @@ export function usePlants() {
 
 // Kept with the user it belongs to, so it never shows one user's records to the next
 let lastLoadedMyPlants = null
+
+const OFFLINE_MESSAGE = 'Unable to reach the server. Check your connection and try again.'
 
 function plantError(error) {
   const alreadySaved = error.code === '23505' && /plants_pkey/.test(error.message ?? '')
