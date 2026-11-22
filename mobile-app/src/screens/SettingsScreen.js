@@ -14,8 +14,10 @@ import {
 import { useHeaderHeight } from '@react-navigation/elements'
 import Button from '../components/Button'
 import PasswordInput from '../components/PasswordInput'
+import { useAppLock } from '../context/AppLockContext'
 import { useAuth } from '../context/AuthContext'
 import { useSync } from '../context/SyncContext'
+import { UNLOCK_METHOD_NAME } from '../lib/appLock'
 import { theme } from '../theme/theme'
 import appConfig from '../../app.json'
 
@@ -125,6 +127,8 @@ export default function SettingsScreen() {
                 Your account is protected by role-based access control.
               </Text>
             </View>
+
+            <BiometricUnlockRow />
           </View>
         </View>
 
@@ -292,6 +296,52 @@ function ChangePasswordSection({ saving, onSavingChange }) {
         </View>
       </View>
     </View>
+  )
+}
+
+// The switch for unlocking the app with Face ID or a fingerprint (or the passcode). Hidden on a
+// phone with neither set up, where the lock can't work.
+function BiometricUnlockRow() {
+  const { available, enabled, setUnlockEnabled } = useAppLock()
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  if (!available) return null
+
+  async function handleChange(next) {
+    setSaving(true)
+    setError(null)
+    setError(await setUnlockEnabled(next))
+    setSaving(false)
+  }
+
+  return (
+    <>
+      <View style={styles.divider} />
+
+      <View style={styles.actionRow}>
+        <View style={styles.actionContent}>
+          <Text style={styles.value}>Unlock with {UNLOCK_METHOD_NAME}</Text>
+          <Text style={styles.description}>
+            Asks for Face ID, your fingerprint or your phone&apos;s passcode when the app opens and
+            after 5 minutes away.
+          </Text>
+          {error ? (
+            <Text style={styles.passwordError} accessibilityLiveRegion="polite">
+              {error}
+            </Text>
+          ) : null}
+        </View>
+        <Switch
+          value={enabled}
+          onValueChange={handleChange}
+          disabled={saving}
+          trackColor={{ true: theme.colors.primary, false: theme.colors.border }}
+          thumbColor={theme.colors.surfaceWhite}
+          accessibilityLabel={`Unlock with ${UNLOCK_METHOD_NAME}`}
+        />
+      </View>
+    </>
   )
 }
 

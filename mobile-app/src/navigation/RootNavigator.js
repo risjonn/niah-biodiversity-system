@@ -1,12 +1,15 @@
+import { useState } from 'react'
 import { ActivityIndicator, StyleSheet, View } from 'react-native'
 import { NavigationContainer } from '@react-navigation/native'
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { StatusBar } from 'expo-status-bar'
+import { useAppLock } from '../context/AppLockContext'
 import { useAuth } from '../context/AuthContext'
 import { isStaffRole } from '../lib/roles'
 import { theme } from '../theme/theme'
+import LockScreen from '../screens/LockScreen'
 import LoginScreen from '../screens/LoginScreen'
 import BotanistHomeScreen from '../screens/BotanistHomeScreen'
 import FieldRegistrationScreen from '../screens/FieldRegistrationScreen'
@@ -118,9 +121,16 @@ const signedInScreens = [
 ]
 
 export default function RootNavigator() {
-  const { isLoading, role } = useAuth()
+  const { isLoading, role, user } = useAuth()
+  const { status: lockStatus, covered } = useAppLock()
+  // Where the user was when the app last locked, so unlocking takes them back there. The lock
+  // screen replaces the navigator, rather than covering it, because an open modal (such as a
+  // full-screen photo) would show above anything drawn over it. Only reused for the same user and
+  // role.
+  const [savedNavigation, setSavedNavigation] = useState(null)
+  const navigationKey = `${user?.id}:${role}`
 
-  if (isLoading) {
+  if (isLoading || lockStatus === 'checking') {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color={theme.colors.primary} accessibilityLabel="Loading" />
@@ -128,8 +138,15 @@ export default function RootNavigator() {
     )
   }
 
+  if (lockStatus === 'locked') {
+    return <LockScreen />
+  }
+
   return (
-    <NavigationContainer>
+    <NavigationContainer
+      initialState={savedNavigation?.key === navigationKey ? savedNavigation.state : undefined}
+      onStateChange={(state) => setSavedNavigation({ key: navigationKey, state })}
+    >
       <StatusBar style="light" />
       <Stack.Navigator screenOptions={screenOptions}>
         {role ? (
@@ -165,11 +182,16 @@ export default function RootNavigator() {
           </Stack.Group>
         )}
       </Stack.Navigator>
+      {/* A blank screen while the app is in the background with the lock on (AppLockContext) */}
+      {covered ? <View style={[StyleSheet.absoluteFill, styles.cover]} /> : null}
     </NavigationContainer>
   )
 }
 
 const styles = StyleSheet.create({
+  cover: {
+    backgroundColor: theme.colors.surface,
+  },
   loading: {
     flex: 1,
     alignItems: 'center',

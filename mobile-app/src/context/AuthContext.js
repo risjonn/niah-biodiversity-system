@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
@@ -32,6 +32,12 @@ export function AuthProvider({ children }) {
   // couldn't refresh the saved session. Replaced by the real session once the phone reconnects.
   const [offlineAccount, setOfflineAccount] = useState(null);
   const [error, setError] = useState(null);
+  // The user who typed their password on the login screen since the app started, so the app lock
+  // (AppLockContext) doesn't ask them to unlock straight after signing in. A session restored on
+  // launch, or the offline account, never sets it.
+  const [passwordUserId, setPasswordUserId] = useState(null);
+  // True while signIn is waiting on Supabase, whose SIGNED_IN event arrives before it returns
+  const signingIn = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -57,7 +63,13 @@ export function AuthProvider({ children }) {
 
       if (event === "SIGNED_OUT") {
         setOfflineAccount(null);
+        setPasswordUserId(null);
         forgetSavedAccount();
+      }
+      // Set alongside the session, so the lock sees both at once. changePassword also signs in,
+      // but isn't a sign-in from the login screen.
+      if (event === "SIGNED_IN" && signingIn.current && nextSession) {
+        setPasswordUserId(nextSession.user.id);
       }
       setSession(nextSession);
       if (!nextSession) setLoadedRole(null);
@@ -141,11 +153,16 @@ export function AuthProvider({ children }) {
 
   async function signIn(email, password) {
     setError(null);
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (signInError) setError(signInErrorMessage(signInError));
+    signingIn.current = true;
+    try {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (signInError) setError(signInErrorMessage(signInError));
+    } finally {
+      signingIn.current = false;
+    }
   }
 
   // Resolves to { data, error }, with error a message ready to show. Doesn't touch the `error` above,
@@ -192,6 +209,7 @@ export function AuthProvider({ children }) {
       setSession(null);
       setLoadedRole(null);
       setOfflineAccount(null);
+      setPasswordUserId(null);
     }
     await forgetSavedAccount();
   }
@@ -218,6 +236,8 @@ export function AuthProvider({ children }) {
       session === undefined || (userId !== null && !roleLoaded && !offlineRole),
     // Why the last sign-in attempt failed, or why the user was signed out
     error,
+    // True when the current user signed in with their password since the app started
+    signedInWithPassword: userId !== null && passwordUserId === userId,
     signIn,
     signOut,
     changePassword,
