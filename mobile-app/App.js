@@ -7,6 +7,7 @@ import {
 } from '@expo-google-fonts/inter'
 import Ionicons from '@expo/vector-icons/Ionicons'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
+import { AppLockProvider } from './src/context/AppLockContext'
 import { AuthProvider } from './src/context/AuthContext'
 import { SyncProvider } from './src/context/SyncContext'
 import RootNavigator from './src/navigation/RootNavigator'
@@ -31,9 +32,12 @@ export default function App() {
     // band, such as Home and Login
     <SafeAreaProvider>
       <AuthProvider>
-        <SyncProvider>
-          <RootNavigator />
-        </SyncProvider>
+        {/* Biometric unlock: while locked, RootNavigator shows the lock screen in place of the app */}
+        <AppLockProvider>
+          <SyncProvider>
+            <RootNavigator />
+          </SyncProvider>
+        </AppLockProvider>
       </AuthProvider>
     </SafeAreaProvider>
   )
