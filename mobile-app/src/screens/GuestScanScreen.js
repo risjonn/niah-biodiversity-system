@@ -26,7 +26,8 @@ import { theme } from '../theme/theme'
 // Guest mode: scan a plant's QR tag, or type its code, to see the approved record and its species,
 // or browse the species list. Works offline from the plant and species lists saved on the phone.
 // Guests are not signed in, so only public data is used: the plants_public view (approved plants
-// only), the species table and its public photos, and the photos of approved, unmonitored plants.
+// only, positions rounded or withheld), the species table and its public photos, and the photos of
+// approved plants that are neither monitored nor of a threatened species (021).
 export default function GuestScanScreen({ navigation }) {
   const plants = usePublicPlants()
   const { fetchSpecies } = useSpecies()
@@ -275,11 +276,6 @@ function ActionTile({ icon, label, onPress }) {
 // An approved plant: its photos, its species (names, status, a short description and "Learn
 // more"), then the record's own details
 function PlantResult({ plant, species, speciesLoading, onLearnMore }) {
-  const latitude = Number(plant.latitude)
-  const longitude = Number(plant.longitude)
-  // Monitored plants' coordinates are already rounded to 2 decimal places by plants_public
-  const decimals = plant.is_monitored ? 2 : 5
-
   return (
     <View style={styles.card} accessibilityLiveRegion="polite">
       {/* Keyed by plant, so another scan starts its own lookup */}
@@ -313,18 +309,60 @@ function PlantResult({ plant, species, speciesLoading, onLearnMore }) {
       <Detail label="Height" value={plant.height_cm != null ? `${plant.height_cm} cm` : null} />
       <Detail label="Notes" value={plant.morphological_notes} />
       <Detail label="Recorded" value={formatDate(plant.recorded_at)} />
-      <Detail
-        label={
-          plant.is_monitored ? 'Approximate location (hidden to protect this plant)' : 'Location'
-        }
-        value={`${latitude.toFixed(decimals)}, ${longitude.toFixed(decimals)}`}
-      />
+      <PlantLocation plant={plant} />
     </View>
   )
 }
 
+// Where the plant is, as much as guests may know (database/schema/021). plants_public withholds
+// the position of monitored plants and threatened species (latitude and longitude are null) and
+// rounds the rest to 2 decimal places, about 1 km. A plant without location_withheld (an app or
+// database older than 021) shows no position at all, rather than one that may be exact.
+function PlantLocation({ plant }) {
+  const label = plant.location_label?.trim() || null
+
+  if (plant.location_withheld === true) {
+    return (
+      <View>
+        <Text style={styles.detailLabel}>Location</Text>
+        {label ? <Text style={styles.body}>{label}</Text> : null}
+        <View style={styles.withheld}>
+          <Ionicons
+            name="lock-closed-outline"
+            size={theme.typography.body.fontSize}
+            color={theme.colors.textSecondary}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          />
+          <Text style={styles.withheldText}>Location withheld to protect this species</Text>
+        </View>
+      </View>
+    )
+  }
+
+  const latitude = Number(plant.latitude)
+  const longitude = Number(plant.longitude)
+  if (
+    plant.location_withheld !== false ||
+    plant.latitude == null ||
+    plant.longitude == null ||
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude)
+  ) {
+    return label ? <Detail label="Location" value={label} /> : null
+  }
+
+  return (
+    <Detail
+      label="Approximate location"
+      value={`${latitude.toFixed(2)}, ${longitude.toFixed(2)}${label ? ` (${label})` : ''}`}
+    />
+  )
+}
+
 // The scanned plant's own photos, falling back to its species' cover photo, then to the leaf.
-// Guests can read and sign the photos of approved plants that aren't monitored; for any other
+// Guests can read and sign the photos of approved plants that aren't monitored or of a threatened
+// species (021); for any other
 // plant (or offline) the lookup finds none, and the species photo shows instead. has_photos from
 // the plant list skips the lookup when there is nothing to find; a list saved by an older version
 // of the app doesn't have it, so the lookup runs then.
@@ -524,5 +562,17 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.caption.fontSize,
     color: theme.colors.textSecondary,
     marginBottom: theme.spacing.xs,
+  },
+  withheld: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    marginTop: theme.spacing.xs,
+  },
+  withheldText: {
+    flexShrink: 1,
+    fontFamily: 'Inter_400Regular',
+    fontSize: theme.typography.bodySmall.fontSize,
+    color: theme.colors.textSecondary,
   },
 })

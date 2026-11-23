@@ -3,7 +3,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../lib/supabaseClient'
 
 // The last plant list that downloaded, so guests can look up plant tags offline
-const CACHE_KEY = 'niah-public-plants-cache'
+const CACHE_KEY = 'niah-public-plants-cache-v2'
+// Lists saved before database/schema/021 hold exact coordinates for every unmonitored plant,
+// including threatened species, so they are deleted rather than read
+const OLD_CACHE_KEYS = ['niah-public-plants-cache']
 
 // Supabase returns at most 1000 rows per request by default, so the list is fetched in pages
 const PAGE_SIZE = 1000
@@ -12,11 +15,13 @@ const MAX_PLANTS = 2000
 // Only the columns guest mode needs. has_photos (database/schema/017) says whether guests can see
 // the plant's own photos (approved, unmonitored plants with photos), so the scan result only looks
 // them up when there are some. The photos themselves are loaded from plant_photos when shown.
+// location_withheld and location_label (021): the view leaves latitude and longitude null for
+// monitored plants and threatened species, and rounds them to 2 decimals for the rest.
 const COLUMNS =
-  'id, species_id, qr_code, height_cm, morphological_notes, latitude, longitude, is_monitored, recorded_at, has_photos'
+  'id, species_id, qr_code, height_cm, morphological_notes, latitude, longitude, is_monitored, recorded_at, has_photos, location_withheld, location_label'
 
-// Approved plants for guest mode, from the plants_public view (coordinates of monitored plants
-// already rounded). Downloads the list when first used and saves it on the phone. Returns
+// Approved plants for guest mode, from the plants_public view (positions already rounded or
+// withheld). Downloads the list when first used and saves it on the phone. Returns
 // { data, error, savedAt, loading, reload, lookupByQrCode }: `error` is a message ready to show on
 // screen, and `savedAt` is set when the server couldn't be reached and the saved list was used
 // instead, the ISO time that list was downloaded (the same pattern as useSpecies).
@@ -68,6 +73,7 @@ export function usePublicPlants() {
 }
 
 async function fetchPublicPlants() {
+  await removeOldSavedPlants()
   const { data, error } = await fetchAllPages()
 
   if (!error) {
@@ -106,6 +112,14 @@ async function savePlants(plants) {
     )
   } catch {
     // The fresh list is still returned; the previously saved one stays as the fallback
+  }
+}
+
+async function removeOldSavedPlants() {
+  try {
+    await AsyncStorage.multiRemove(OLD_CACHE_KEYS)
+  } catch {
+    // Tried again the next time the list is loaded
   }
 }
 
