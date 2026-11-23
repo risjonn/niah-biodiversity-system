@@ -152,12 +152,29 @@ select pg_temp.rls_check('RLS-02', 'guest',
   (select count(*)::text from plants where review_status = 'approved'),
   $$select count(*)::text from plants_public$$);
 
+-- Changed by 021: before, only monitored plants were rounded and every other plant showed its
+-- exact position. Now every plant is rounded or withheld. Rows with a withheld (null) position
+-- don't count as unrounded, so RLS-30 checks those separately.
 select pg_temp.rls_check('RLS-03', 'guest',
-  'Monitored plant GPS in plants_public is rounded to 2 decimals (count of unrounded)', '0',
+  'Plant GPS in plants_public is rounded to 2 decimals or withheld (count of unrounded)', '0',
   $$select count(*)::text from plants_public
-    where is_monitored
-      and (latitude::numeric <> round(latitude::numeric, 2)
-        or longitude::numeric <> round(longitude::numeric, 2))$$);
+    where latitude::numeric <> round(latitude::numeric, 2)
+       or longitude::numeric <> round(longitude::numeric, 2)$$);
+
+-- 021: monitored plants and plants of vulnerable, endangered or critically endangered species
+select pg_temp.rls_check('RLS-30', 'guest',
+  'Sensitive plants in plants_public: position withheld (count still shown)', '0',
+  $$select count(*)::text from plants_public pp join species s on s.id = pp.species_id
+    where (pp.is_monitored
+        or s.conservation_status in ('vulnerable', 'endangered', 'critically_endangered'))
+      and (pp.latitude is not null or pp.longitude is not null
+        or pp.location_withheld is not true)$$);
+
+select pg_temp.rls_check('RLS-31', 'guest',
+  'Read photo rows of sensitive plants (count)', '0',
+  $$select count(*)::text from plant_photos ph
+    join plants_public pp on pp.id = ph.plant_id
+    where pp.location_withheld$$);
 
 select pg_temp.rls_check('RLS-04', 'guest',
   'Edit an approved plant through plants_public', 'denied',

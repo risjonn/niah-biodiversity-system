@@ -358,7 +358,12 @@ begin
   ) grants;
 
   -- ---------- fixtures, created with no signed-in user ----------
-  insert into public.species (scientific_name) values ('PHOTO-TEST species')
+  -- Every fixture plant uses this species. Least concern on purpose: since 021, guests can't see
+  -- the photos of plants whose species is vulnerable, endangered or critically endangered, so the
+  -- "approved, unmonitored = public" checks below only hold for a non-threatened species.
+  -- (021_sensitive_locations_test.sql covers the threatened statuses.)
+  insert into public.species (scientific_name, conservation_status)
+    values ('PHOTO-TEST species', 'least_concern')
     returning id into test_species;
   -- Created the way the current web app creates a species with a photo
   insert into public.species (scientific_name, reference_photo_url)
@@ -1025,9 +1030,11 @@ begin
   );
 
   insert into multiple_photos_results (check_name, result, detail)
-  select 'plants_public: exposes the 005 columns plus has_photos, nothing else',
+  -- 021 appended location_withheld and location_label
+  select 'plants_public: exposes the 005 columns plus has_photos (and 021''s two columns), nothing else',
     case when cols = 'id,species_id,qr_code,height_cm,morphological_notes,photo_url,latitude,'
-        || 'longitude,is_monitored,recorded_at,has_photos' then 'PASS' else 'FAIL' end,
+        || 'longitude,is_monitored,recorded_at,has_photos,location_withheld,location_label'
+      then 'PASS' else 'FAIL' end,
     cols
   from (
     select string_agg(column_name::text, ',' order by ordinal_position) as cols
