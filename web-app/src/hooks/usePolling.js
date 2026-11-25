@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 
 // How often the alert lists, the open alerts card and the sidebar badge reload while their page
-// is open and the browser tab is visible
-export const POLL_INTERVAL_MS = 5 * 1000
+// is open and the browser tab is visible. The fallback: new and changed alerts normally arrive
+// within a second through hooks/useAlertsRealtime.js.
+export const POLL_INTERVAL_MS = 15 * 1000
 
 // Runs `poll` once on mount, then again `intervalMs` after each run finishes, for as long as the
 // component is mounted.

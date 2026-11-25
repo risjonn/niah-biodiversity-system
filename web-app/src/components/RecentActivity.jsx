@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import {
   Alert,
@@ -21,6 +21,7 @@ import LocalFloristOutlinedIcon from '@mui/icons-material/LocalFloristOutlined'
 import EmptyState from './EmptyState'
 import PlantRecordPanel from './PlantRecordPanel'
 import RelativeTime from './RelativeTime'
+import { useAlertsRealtime } from '../hooks/useAlertsRealtime'
 import { usePlants } from '../hooks/usePlants'
 import { usePolling } from '../hooks/usePolling'
 import { useSensors } from '../hooks/useSensors'
@@ -177,18 +178,24 @@ function LatestRecords() {
 
 // The six newest alerts, open or acknowledged, with the reading that raised each one. A device
 // alert shows its code's label, icon and meaning. Each links to the sensors page, where alerts
-// are acknowledged. Reloads every POLL_INTERVAL_MS while the tab is visible (usePolling).
+// are acknowledged. Reloads within about a second of an alert being raised or acknowledged
+// (useAlertsRealtime), and every POLL_INTERVAL_MS while the tab is visible as the fallback
+// (usePolling).
 function LatestAlerts() {
   const { getRecentAlerts } = useSensors()
   // { data, error, loadedAt }: data is the last list that loaded (null until one has) and error
   // the latest refresh's message, so a failed refresh keeps the list on screen above an error,
   // as on the sensors page. Only the first load shows the skeleton.
   const [result, setResult] = useState(null)
+  // Only the newest request may update the list. A realtime reload and a poll can overlap, and a
+  // slower, older answer mustn't overwrite a newer one.
+  const latestRequest = useRef(0)
 
   const loadAlerts = useCallback(
     async ({ isCurrent }) => {
+      const requestId = ++latestRequest.current
       const alerts = await getRecentAlerts(SHOWN)
-      if (!isCurrent()) return
+      if (!isCurrent() || requestId !== latestRequest.current) return
       setResult((current) =>
         alerts.error
           ? { data: current?.data ?? null, error: alerts.error, loadedAt: current?.loadedAt ?? null }
@@ -198,6 +205,7 @@ function LatestAlerts() {
     [getRecentAlerts],
   )
   usePolling(loadAlerts)
+  useAlertsRealtime(loadAlerts)
 
   const alerts = result?.data
   return (

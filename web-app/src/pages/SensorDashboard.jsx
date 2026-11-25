@@ -62,7 +62,8 @@ import { useAuth } from '../context/AuthContext'
 import { useNavCounts } from '../context/NavCountsContext'
 import { useToast } from '../context/ToastContext'
 import SensorCharts from '../components/SensorCharts'
-import { usePolling } from '../hooks/usePolling'
+import { useAlertsRealtime } from '../hooks/useAlertsRealtime'
+import { POLL_INTERVAL_MS, usePolling } from '../hooks/usePolling'
 import { useSensors } from '../hooks/useSensors'
 import {
   alertIcon,
@@ -203,6 +204,9 @@ export default function SensorDashboard() {
   // Loads straight away, then every POLL_INTERVAL_MS while the tab is visible, and at once on
   // coming back to the tab. Only the first load shows the spinner: later ones swap the snapshot.
   usePolling(load)
+  // Reloads within about a second of an alert being raised or acknowledged anywhere. The polling
+  // above is the fallback when this isn't connected.
+  const realtimeStatus = useAlertsRealtime(load)
 
   async function refresh() {
     setIsRefreshing(true)
@@ -223,7 +227,8 @@ export default function SensorDashboard() {
         title="Sensors"
         action={
           snapshot ? (
-            <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+            <Stack direction="row" spacing={2} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+              <LiveChip status={realtimeStatus} />
               <Typography variant="body2" color="textSecondary">
                 Last updated <RelativeTime value={snapshot.loadedAt} now={checkedAt} />
               </Typography>
@@ -1110,6 +1115,39 @@ function DeviceStateChip({ node, isStale = false }) {
         </Typography>
       ) : null}
     </Stack>
+  )
+}
+
+// Whether alerts are arriving live (useAlertsRealtime) or only through the polling fallback: a
+// green "Live" chip with a dot when subscribed, a grey "Polling" one while connecting or offline.
+// The label says it in words, so it never relies on colour alone.
+function LiveChip({ status }) {
+  const isLive = status === 'live'
+  const dotColor = isLive ? 'success.main' : 'text.secondary'
+
+  return (
+    <Tooltip
+      describeChild
+      title={
+        isLive
+          ? 'New alerts appear within a second'
+          : `Not connected for live alerts. Updating every ${POLL_INTERVAL_MS / 1000} seconds.`
+      }
+    >
+      <Chip
+        size="small"
+        variant="outlined"
+        color={isLive ? 'success' : 'default'}
+        label={isLive ? 'Live' : 'Polling'}
+        icon={
+          <Box
+            aria-hidden="true"
+            sx={{ width: STATUS_DOT_SIZE, height: STATUS_DOT_SIZE, borderRadius: '50%', bgcolor: dotColor }}
+          />
+        }
+        sx={{ color: isLive ? 'success.main' : 'text.secondary' }}
+      />
+    </Tooltip>
   )
 }
 
