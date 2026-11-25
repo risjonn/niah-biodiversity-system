@@ -1,0 +1,21 @@
+-- Realtime alerts on the web app: new and changed alerts reach the Sensors page and the Dashboard
+-- within about a second, instead of at the next poll. Run after 001-021.
+--
+-- Supabase Realtime only sends postgres_changes events for tables in the supabase_realtime
+-- publication. This adds alerts to it. The web app (hooks/useAlertsRealtime.js) subscribes to
+-- INSERT and UPDATE on alerts and, on an event, reruns the page's normal query; it never builds
+-- the screen from the event itself. Polling every 15 s (hooks/usePolling.js) stays as the fallback.
+--
+-- Security: Realtime checks each event against the subscriber's RLS before sending it, so the
+-- policies on alerts still decide who hears about what. alerts_select_staff (001) lets only
+-- conservation officers and admins read alerts, so only they get events; guests and botanists get
+-- nothing. No policy, grant or function changes here.
+--
+-- Replica identity stays the default (primary key): the app ignores the payload, so UPDATE events
+-- don't need the old row's values.
+--
+-- Re-running this fails with "relation "alerts" is already member of publication", which is
+-- harmless. To undo:
+--   alter publication supabase_realtime drop table public.alerts;
+
+alter publication supabase_realtime add table public.alerts;

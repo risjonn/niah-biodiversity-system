@@ -13,6 +13,7 @@ import StatCard from '../components/StatCard'
 import { useAuth } from '../context/AuthContext'
 import { useNavCounts } from '../context/NavCountsContext'
 import { usePlants } from '../hooks/usePlants'
+import { useAlertsRealtime } from '../hooks/useAlertsRealtime'
 import { usePolling } from '../hooks/usePolling'
 import { useReports } from '../hooks/useReports'
 import { useSpecies } from '../hooks/useSpecies'
@@ -44,8 +45,10 @@ export default function Dashboard() {
   const { fullName } = useAuth()
   // The sidebar's pending reviews and open alerts counts, not queried again
   const { counts, refreshOpenAlerts } = useNavCounts()
-  // Keeps the open alerts card and the sidebar badge up to date while the dashboard is open
+  // Keeps the open alerts card and the sidebar badge up to date while the dashboard is open:
+  // within about a second through realtime, with polling as the fallback
   usePolling(refreshOpenAlerts)
+  useAlertsRealtime(refreshOpenAlerts)
   // Fixed for this visit, so the greeting and date don't change while the page is open
   const [now] = useState(() => Date.now())
   const firstName = fullName?.trim().split(/\s+/)[0]
