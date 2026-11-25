@@ -9,7 +9,9 @@ const NavCountsContext = createContext(null)
 // dashboard card) and open alerts. Reloaded on every route change, and by pages straight after
 // something that changes them (approve/reject) through refreshCounts. The sensors page sets the
 // open alerts count itself, from the list it has just loaded (setOpenAlertsCount), so the badge
-// and that list always match.
+// and that list always match. Both the sensors page and the dashboard poll (hooks/usePolling.js):
+// the sensors page through setOpenAlertsCount, the dashboard through refreshOpenAlerts, so the
+// badge keeps up while either is open.
 // A count is null while unknown or if it failed to load; the badge is hidden then, as at 0.
 // errors.<count> holds the message when it failed, so the dashboard card can tell loading from
 // failed (the badge doesn't need to).
@@ -45,6 +47,24 @@ export function NavCountsProvider({ children }) {
     }))
   }, [countPendingReviews, countOpenAlerts])
 
+  // Reloads only the open alerts count, for the dashboard's poll (usePolling), which would
+  // otherwise query pending reviews every few seconds too. Unlike refreshCounts, a failure keeps
+  // the last count it had, with no error, so one failed poll doesn't blank the badge and the
+  // dashboard card until the next one. The error only shows while no count has loaded yet.
+  const refreshOpenAlerts = useCallback(async () => {
+    const asked = ++versions.current.openAlerts
+    const alerts = await countOpenAlerts()
+    if (versions.current.openAlerts !== asked) return
+    setCounts((current) => {
+      if (alerts.error && current.openAlerts != null) return current
+      return {
+        ...current,
+        openAlerts: alerts.error ? null : alerts.data,
+        errors: { ...current.errors, openAlerts: alerts.error },
+      }
+    })
+  }, [countOpenAlerts])
+
   const setOpenAlertsCount = useCallback((count) => {
     versions.current.openAlerts += 1
     setCounts((current) => ({
@@ -68,8 +88,8 @@ export function NavCountsProvider({ children }) {
   }, [])
 
   const value = useMemo(
-    () => ({ counts, refreshCounts, setOpenAlertsCount }),
-    [counts, refreshCounts, setOpenAlertsCount],
+    () => ({ counts, refreshCounts, refreshOpenAlerts, setOpenAlertsCount }),
+    [counts, refreshCounts, refreshOpenAlerts, setOpenAlertsCount],
   )
   return <NavCountsContext.Provider value={value}>{children}</NavCountsContext.Provider>
 }

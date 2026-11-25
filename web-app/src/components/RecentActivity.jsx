@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import {
   Alert,
@@ -22,6 +22,7 @@ import EmptyState from './EmptyState'
 import PlantRecordPanel from './PlantRecordPanel'
 import RelativeTime from './RelativeTime'
 import { usePlants } from '../hooks/usePlants'
+import { usePolling } from '../hooks/usePolling'
 import { useSensors } from '../hooks/useSensors'
 import {
   alertIcon,
@@ -176,31 +177,41 @@ function LatestRecords() {
 
 // The six newest alerts, open or acknowledged, with the reading that raised each one. A device
 // alert shows its code's label, icon and meaning. Each links to the sensors page, where alerts
-// are acknowledged.
+// are acknowledged. Reloads every POLL_INTERVAL_MS while the tab is visible (usePolling).
 function LatestAlerts() {
   const { getRecentAlerts } = useSensors()
+  // { data, error, loadedAt }: data is the last list that loaded (null until one has) and error
+  // the latest refresh's message, so a failed refresh keeps the list on screen above an error,
+  // as on the sensors page. Only the first load shows the skeleton.
   const [result, setResult] = useState(null)
 
-  useEffect(() => {
-    let cancelled = false
-    getRecentAlerts(SHOWN).then((alerts) => {
-      if (!cancelled) setResult({ ...alerts, loadedAt: Date.now() })
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [getRecentAlerts])
+  const loadAlerts = useCallback(
+    async ({ isCurrent }) => {
+      const alerts = await getRecentAlerts(SHOWN)
+      if (!isCurrent()) return
+      setResult((current) =>
+        alerts.error
+          ? { data: current?.data ?? null, error: alerts.error, loadedAt: current?.loadedAt ?? null }
+          : { data: alerts.data, error: null, loadedAt: Date.now() },
+      )
+    },
+    [getRecentAlerts],
+  )
+  usePolling(loadAlerts)
 
+  const alerts = result?.data
   return (
     <ActivityCard title="Latest alerts" viewAllTo="/sensors">
       {!result ? <ListSkeleton label="Loading latest alerts" /> : null}
-      {result?.error ? <Alert severity="error">{result.error}</Alert> : null}
-      {result && !result.error && result.data.length === 0 ? (
-        <EmptyState message="No alerts yet" dense />
+      {result?.error ? (
+        <Alert severity="error">
+          {alerts ? `The latest alerts could not be loaded. ${result.error}` : result.error}
+        </Alert>
       ) : null}
-      {result && result.data.length > 0 ? (
+      {alerts && alerts.length === 0 ? <EmptyState message="No alerts yet" dense /> : null}
+      {alerts && alerts.length > 0 ? (
         <List disablePadding>
-          {result.data.map((alert) => {
+          {alerts.map((alert) => {
             const color = severityColors[alert.severity] ?? 'primary'
             const reading = alertReadingText(alert)
             // Threshold alerts' messages repeat the reading and node above, so only device

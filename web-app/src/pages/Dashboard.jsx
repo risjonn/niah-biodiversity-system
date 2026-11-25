@@ -13,8 +13,8 @@ import StatCard from '../components/StatCard'
 import { useAuth } from '../context/AuthContext'
 import { useNavCounts } from '../context/NavCountsContext'
 import { usePlants } from '../hooks/usePlants'
+import { usePolling } from '../hooks/usePolling'
 import { useReports } from '../hooks/useReports'
-import { useSensors } from '../hooks/useSensors'
 import { useSpecies } from '../hooks/useSpecies'
 import { chartTick, chartTooltipProps, chartValueLabel, formatCount } from '../lib/chartStyles'
 import { conservationStatusLabels } from '../lib/conservationStatus'
@@ -42,14 +42,15 @@ function greeting(now) {
 // Officers and admins see the same dashboard
 export default function Dashboard() {
   const { fullName } = useAuth()
-  // The sidebar's pending reviews count, not queried again
-  const { counts } = useNavCounts()
+  // The sidebar's pending reviews and open alerts counts, not queried again
+  const { counts, refreshOpenAlerts } = useNavCounts()
+  // Keeps the open alerts card and the sidebar badge up to date while the dashboard is open
+  usePolling(refreshOpenAlerts)
   // Fixed for this visit, so the greeting and date don't change while the page is open
   const [now] = useState(() => Date.now())
   const firstName = fullName?.trim().split(/\s+/)[0]
   const { countApprovedPlants } = usePlants()
   const { countSpecies, countSpeciesByConservationStatus } = useSpecies()
-  const { countOpenAlerts } = useSensors()
   const { fetchRecordsByMonth } = useReports()
 
   // One call with no date range feeds both record charts: the last 12 months for the monthly
@@ -113,14 +114,19 @@ export default function Dashboard() {
           color="secondary"
           loadCount={countSpecies}
         />
-        <CountCard
-          title="Open alerts"
-          caption="Not yet acknowledged"
-          to="/sensors"
-          icon={NotificationsActiveOutlinedIcon}
-          color="error"
-          loadCount={countOpenAlerts}
-        />
+        {/* The sidebar badge's count as well, polled above, so the card and badge match */}
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+          <StatCard
+            icon={NotificationsActiveOutlinedIcon}
+            color="error"
+            label="Open alerts"
+            caption="Not yet acknowledged"
+            to="/sensors"
+            loading={counts.openAlerts == null && !counts.errors.openAlerts}
+            error={counts.errors.openAlerts}
+            value={counts.openAlerts == null ? null : formatCount(counts.openAlerts)}
+          />
+        </Grid>
       </Grid>
 
       <RecentActivity />

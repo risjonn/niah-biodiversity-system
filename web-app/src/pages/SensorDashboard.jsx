@@ -62,6 +62,7 @@ import { useAuth } from '../context/AuthContext'
 import { useNavCounts } from '../context/NavCountsContext'
 import { useToast } from '../context/ToastContext'
 import SensorCharts from '../components/SensorCharts'
+import { usePolling } from '../hooks/usePolling'
 import { useSensors } from '../hooks/useSensors'
 import {
   alertIcon,
@@ -90,8 +91,6 @@ import { batteryLevel, nodeSeries, temperatureSparklines } from '../lib/sensorCh
 import { visuallyHidden } from '../lib/visuallyHidden'
 import { chartTokens, tokens } from '../theme/theme'
 
-// How often nodes and alerts reload while the page is open and the browser tab is visible
-const REFRESH_INTERVAL_MS = 15 * 1000
 // A node the server hasn't heard from for this long is shown as offline. The gateway sends a
 // reading from each node every minute, so this is several missed readings in a row.
 const OFFLINE_AFTER_MS = 5 * 60 * 1000
@@ -160,7 +159,7 @@ export default function SensorDashboard() {
   const [checkedAt, setCheckedAt] = useState(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
   // Goes up on each press of Refresh, which also reloads the charts. The automatic refresh
-  // leaves them alone: hourly averages barely change in 15 seconds (see SensorCharts).
+  // leaves them alone: hourly averages barely change between polls (see SensorCharts).
   const [chartRefreshKey, setChartRefreshKey] = useState(0)
   // The hourly rows the charts last loaded ({ rows, now }), or null until they load or if they
   // failed. The node cards' sparklines come from these, with no query of their own.
@@ -201,34 +200,9 @@ export default function SensorDashboard() {
     })
   }, [getNodeStatus, getAlerts, setOpenAlertsCount])
 
-  // Loads straight away, then every REFRESH_INTERVAL_MS while the tab is visible. Coming back to
-  // the tab loads at once, since the data may be well out of date by then.
-  useEffect(() => {
-    let timer = null
-    const start = () => {
-      timer = setInterval(load, REFRESH_INTERVAL_MS)
-    }
-    const stop = () => {
-      clearInterval(timer)
-      timer = null
-    }
-    function handleVisibilityChange() {
-      if (document.hidden) {
-        stop()
-      } else if (!timer) {
-        load()
-        start()
-      }
-    }
-
-    load()
-    if (!document.hidden) start()
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    return () => {
-      stop()
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-    }
-  }, [load])
+  // Loads straight away, then every POLL_INTERVAL_MS while the tab is visible, and at once on
+  // coming back to the tab. Only the first load shows the spinner: later ones swap the snapshot.
+  usePolling(load)
 
   async function refresh() {
     setIsRefreshing(true)
