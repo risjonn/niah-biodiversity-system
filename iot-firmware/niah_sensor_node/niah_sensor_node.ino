@@ -1,19 +1,18 @@
 // ============================================================================
 // NIAH NATIONAL PARK SMART IOT PLANT PROTECTION SYSTEM
-// FOREST SENSOR NODE  v2.0  (100% offline LoRa transmitter - no Wi-Fi/Internet)
+// FOREST SENSOR NODE  v2.1  (100% offline LoRa transmitter - no Wi-Fi/Internet)
 // + YOLO camera detector link (USB serial to the PC running niah_detector.py)
 //
-// Upgraded from your ForestNode.txt to follow niah_complete_system_logic_and_roadmap.
-//
 // SECURITY   : multi-sensor fusion, impact bursts, day/night curfew (with time
-//              fallback), repetition + loitering escalation, 3-stage theft with
-//              LATCHED lock (saved in flash), GPS quality gating, GPS shield/jam
-//              detection, critical fall, severity INFO/WARNING/CRITICAL, maintenance
+//              fallback), repetition + loitering escalation, 2-tier theft
+//              (POSSIBLE_THEFT + LATCHED PLANT_STOLEN_MOVING with 5s live GPS),
+//              GPS quality gating, GPS shield/jam detection, critical fall,
+//              severity INFO/WARNING/CRITICAL, maintenance mode
 // ENVIRONMENT: two-step fire (rate-of-change OR >40C), drought, waterlogging,
-//              wet-leaf filter, soil checks, daily summary (+ wildlife activity)
+//              wet-leaf filter (WET_LEAF), soil checks, daily summary
 // HEALTH     : sensor sanity (NaN/frozen/MPU re-init), health inside every packet,
-//              watchdog + reset reason, capped flash log, battery + last-gasp,
-//              boot self-test, optional lid switch, stealth LED, TX rate limit
+//              watchdog + reset reason, capped flash log, boot self-test,
+//              stealth LED, TX rate limit (5/min for non-critical)
 // COMMS      : sequence numbers, HMAC signature, AES-128 encryption, ACK + 3 retries,
 //              store-and-forward of un-ACKed CRITICAL alerts, remote commands
 //              (MAINT_ON, MAINT_OFF, CLEAR_THEFT, CALIBRATE, SET)
@@ -25,8 +24,8 @@
 //   #define NODE_IDENTIFIER  "NODE-01"
 //   #define LORA_SHARED_KEY  "long-random-text-identical-on-gateway"
 //
-// Serial protocol to the PC (unchanged):  node -> PC: TRIGGER_CAM:<source>
-//                                         PC -> node: HUMAN_DETECTED / NO_HUMAN
+// Serial protocol to the PC:  node -> PC: TRIGGER_CAM:<source>
+//                             PC -> node: HUMAN_DETECTED / NO_HUMAN
 // ============================================================================
 
 #include <SPI.h>
@@ -50,44 +49,37 @@
 #ifndef LORA_SHARED_KEY
   #define LORA_SHARED_KEY "CHANGE-ME-niah-shared-key"
 #endif
-#define FW_VERSION "niah-2.0"
+#define FW_VERSION "niah-2.1"
 
 // ---------- Node Identification (Loaded from secrets.h) ----------
 const char* NODE_ID = NODE_IDENTIFIER;
 
-// ---------- LoRa Pin Mapping (Forest Node SPI) ----------
-#define LORA_SCK   18
-#define LORA_MISO  19
-#define LORA_MOSI  23
-#define LORA_SS    5
-#define LORA_RST   14
-#define LORA_DIO0  26
+// ---------- LoRa Pin Mapping (Custom 30-Pin ESP32 Left/Right Split) ----------
+#define LORA_SCK   26   // D26 (Left)
+#define LORA_MISO  35   // D35 (Left - Input Only)
+#define LORA_MOSI  25   // D25 (Left)
+#define LORA_SS    27   // D27 / NSS (Left)
+#define LORA_RST   22   // D22 (Right)
+#define LORA_DIO0  23   // D23 (Right)
 
 const long LORA_FREQ = 433E6;       // Must match Gateway
 const byte LORA_SYNC_WORD = 0xF3;   // Must match Gateway
 
 // ---------- Sensor Pin Mapping ----------
-#define DHTPIN 4
+#define DHTPIN 19       // D19 (Right)
 #define DHTTYPE DHT11
-const int GPS_RX_PIN = 16;    // NEO-6M TX
-const int GPS_TX_PIN = 17;    // NEO-6M RX
-// Node (Box) MPU6050 : SDA=D21, SCL=D22  → Wire
-// Plant MPU6050      : SDA=D32, SCL=D33  → Wire1
-const int PIR_PIN  = 27;
-const int RAIN_PIN = 25;
-const int SOIL_PIN = 34;
-const int LED_PIN  = 2;
+const int GPS_RX_PIN = 13;    // D14 (Left) -> connects to NEO-6M TX
+const int GPS_TX_PIN = 14 `12222ww2222222222222222222222222q22;    // D13 (Left) -> connects to NEO-6M RX
+// Node (Box) MPU6050 : SDA=D32, SCL=D33  -> Wire  (Left)
+// Plant MPU6050      : SDA=D18, SCL=D5   -> Wire1 (Right)
+const int PIR_PIN  = 17;      // TX2 / GPIO 17 (Right)
+const int RAIN_PIN = 21;      // D21 (Right)
+const int SOIL_PIN = 34;      // D34 (Left)
+const int LED_PIN  = 2;       // Onboard LED
 
-// ---------- Optional hardware (leave false until wired) ----------
-const bool  LID_SWITCH_ENABLED = false;   // reed/micro switch to GND on LID_PIN (open lid = HIGH)
-const int   LID_PIN = 13;                 // moved (D32 now used by Plant MPU SDA)
-const bool  BATTERY_MONITOR_ENABLED = false;   // needs a resistor divider on BATTERY_PIN
-const int   BATTERY_PIN = 35;
-const float BATTERY_DIVIDER_RATIO = 2.0;
-const float BATTERY_LOW_VOLT = 3.5;
-const float BATTERY_CRITICAL_VOLT = 3.3;       // below this: one last-gasp POWER_LOSS packet
-const bool  STEALTH_MODE = false;              // true in the field: LED never lights (except Maintenance)
-const bool  SERIAL_CONTROL_ENABLED = true;     // false in the field: only camera replies are accepted
+// ---------- Behavior Flags ----------
+const bool STEALTH_MODE = false;              // true in the field: LED never lights (except Maintenance)
+const bool SERIAL_CONTROL_ENABLED = true;     // false in the field: only camera replies are accepted
 
 // ---------- Day/Night (Sarawak UTC+8) ----------
 const int NIGHT_START_HOUR = 18;
@@ -95,10 +87,10 @@ const int NIGHT_END_HOUR   = 7;
 const float CRITICAL_FALL_DEG = 75.0;
 
 // ---------- Tunable thresholds (changeable by remote SET command, stored in flash) ----------
-float tiltDayTrigger   = 15.0;      // key "td"  → Node (box) day tilt
-float tiltNightTrigger = 8.0;       // key "tn"  → Node (box) night tilt
-float plantTiltDayTrigger   = 12.0; // key "pd"  → Plant day tilt
-float plantTiltNightTrigger = 6.0;  // key "pn"  → Plant night tilt
+float tiltDayTrigger   = 25.0;      // key "td"  -> Node (box) day tilt
+float tiltNightTrigger = 25.0;       // key "tn"  -> Node (box) night tilt
+float plantTiltDayTrigger   = 25.0; // key "pd"  -> Plant day tilt
+float plantTiltNightTrigger = 25.0;  // key "pn"  -> Plant night tilt
 double geofenceRadiusM = 15.0;      // key "gr"
 unsigned long loiterSec = 120;      // key "ls"
 
@@ -130,7 +122,7 @@ const unsigned long STATE_DEBOUNCE_MS = 500;
 
 // ---------- Timing ----------
 const unsigned long PIR_WARMUP_MS         = 20000;
-const unsigned long ENV_TRANSMIT_INTERVAL = 30000;
+const unsigned long ENV_TRANSMIT_INTERVAL = 60000;   // 1 minute
 const unsigned long NORMAL_TX_INTERVAL_MS = 60000;
 const unsigned long QUIET_AFTER_MS        = 600000;
 const unsigned long LIVE_TRACK_INTERVAL   = 5000;
@@ -149,7 +141,7 @@ const char* camSource = "";
 // ---------- Communications ----------
 const unsigned long ACK_WAIT_MS = 800;
 const int  CRITICAL_ATTEMPTS = 3;
-const int  MAX_TX_PER_MIN    = 10;     // non-critical packets per minute
+const int  MAX_TX_PER_MIN    = 5;      // non-critical packets per minute (live GPS pursuit exempted)
 const int  MAX_PLAINTEXT     = 246;    // 255 LoRa bytes - 9 header bytes
 const int  WDT_TIMEOUT_S     = 15;
 
@@ -163,8 +155,8 @@ const int   MAX_PENDING      = 10;
 // ---------- Objects ----------
 DHT dht(DHTPIN, DHTTYPE);
 TinyGPSPlus gps;
-Adafruit_MPU6050 mpu;          // Node / Box accelerometer (Wire  D21/D22)
-Adafruit_MPU6050 mpuPlant;    // Plant accelerometer       (Wire1 D32/D33)
+Adafruit_MPU6050 mpu;          // Node / Box accelerometer (Wire  D32/D33)
+Adafruit_MPU6050 mpuPlant;     // Plant accelerometer      (Wire1 D18/D5)
 Preferences prefs;
 uint8_t aesKey[16];
 
@@ -235,6 +227,7 @@ double homeLat = 0.0, homeLon = 0.0;
 double homeSumLat = 0.0, homeSumLon = 0.0; int homeSamples = 0;
 double distanceMovedMeters = 0.0;
 int awayCount = 0;
+bool possibleTheftActive = false;
 bool theftLatched = false;
 bool gpsShielded = false;
 unsigned long lastFixMs = 0, fixBackSince = 0, lastGpsSample = 0;
@@ -253,15 +246,12 @@ unsigned long bootTime = 0, lastEnvTransmitTime = 0, lastScheduledTx = 0;
 unsigned long lastLiveTrackTime = 0, lastBaselineRefresh = 0, lastHealthSend = 0;
 bool maintenanceMode = false; unsigned long maintenanceStartTime = 0;
 bool ledAlertOn = false;
-bool lidOpen = false;
-bool lastGaspSent = false;
-float batteryV = 0.0;
 
 // ---------- State machine ----------
 String confirmedState = "NORMAL";
 String pendingState = "NORMAL";
 unsigned long pendingStateStart = 0;
-String healthCode = "OK";            // short code: OK DHT BAT MPU FRZ RAIN FIRE HEAT SOIL WLOG DRY
+String healthCode = "OK";            // short code: OK DHT MPU FRZ WET_LEAF FIRE HEAT SOIL WLOG DRY
 String lastSentHealth = "";
 bool needBootHealth = true;
 String selfTest = "";
@@ -284,6 +274,20 @@ void getAngles(float ax, float ay, float az, float &pitch, float &roll) {
   roll  = atan2(ay, sqrt(ax * ax + az * az)) * 180.0 / PI;
 }
 
+const char* healthDescription(const String &code) {
+  if (code == "OK")       return "All sensors healthy";
+  if (code == "DHT")      return "DHT11 sensor read failure (3+ failed reads)";
+  if (code == "MPU")      return "Accelerometer fault (retrying I2C init)";
+  if (code == "FRZ")      return "Sensor reading frozen/identical for 12 hours";
+  if (code == "WET_LEAF") return "Wet leaf or debris stuck on rain plate (> 4 hours)";
+  if (code == "FIRE")     return "Fire or canopy breach heat/humidity anomaly";
+  if (code == "HEAT")     return "High temperature heat stress (> 35 C)";
+  if (code == "SOIL")     return "Soil moisture probe disconnected or maxed (> 1 hour)";
+  if (code == "WLOG")     return "Soil waterlogged at 100% without rain (> 6 hours)";
+  if (code == "DRY")      return "Low soil moisture drought warning (< 20%)";
+  return "Unknown status";
+}
+
 const char* resetReasonStr() {
   switch (esp_reset_reason()) {
     case ESP_RST_POWERON:  return "POWERON";
@@ -301,9 +305,8 @@ const char* resetReasonStr() {
 // Severity: 0 = INFO, 1 = WARNING, 2 = CRITICAL
 int severityOf(const String &s) {
   if (s == "CRITICAL_FALL" || s == "PLANT_STOLEN_MOVING" || s == "NIGHT_POACHING_RISK" ||
-      s == "FIRE_OR_CANOPY_BREACH" || s == "GPS_SHIELDED_OR_JAMMED" ||
-      s == "TAMPER_LID_OPENED" || s == "POWER_LOSS") return 2;
-  if (s == "POACHING_RISK" || s == "IMPACT_DETECTED" ||
+      s == "FIRE_OR_CANOPY_BREACH" || s == "GPS_SHIELDED_OR_JAMMED") return 2;
+  if (s == "POSSIBLE_THEFT" || s == "POACHING_RISK" || s == "IMPACT_DETECTED" ||
       s == "LOITERING" || s == "REPEATED_DISTURBANCE") return 1;
   return 0;
 }
@@ -452,18 +455,18 @@ void queuePending(const String &body) {            // body = unsigned JSON
 
 // ============================================================================
 // Dual MPU6050 + calibration (Node = box, Plant = plant)
-// Node  → Wire  (SDA=21, SCL=22)
-// Plant → Wire1 (SDA=32, SCL=33)
+// Node  -> Wire  (SDA=D32, SCL=D33)
+// Plant -> Wire1 (SDA=D18, SCL=D5)
 // ============================================================================
 bool mpuStart() {
-  Wire.begin(21, 22);
+  Wire.begin(32, 33);
   if (!mpu.begin(0x68, &Wire)) return false;
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
   mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
   return true;
 }
 bool mpuPlantStart() {
-  Wire1.begin(32, 33);
+  Wire1.begin(18, 5);
   if (!mpuPlant.begin(0x68, &Wire1)) return false;
   mpuPlant.setAccelerometerRange(MPU6050_RANGE_8_G);
   mpuPlant.setFilterBandwidth(MPU6050_BAND_21_HZ);
@@ -494,7 +497,7 @@ bool calibratePlantBaseline() {
 void initMPU() {
   // Node (box)
   if (!mpuStart()) {
-    Serial.println("[WARNING] Node MPU6050 not detected on D21/D22!");
+    Serial.println("[WARNING] Node MPU6050 not detected on D32/D33!");
     mpuReady = false;
   } else {
     mpuReady = true;
@@ -510,7 +513,7 @@ void initMPU() {
 
   // Plant
   if (!mpuPlantStart()) {
-    Serial.println("[WARNING] Plant MPU6050 not detected on D32/D33!");
+    Serial.println("[WARNING] Plant MPU6050 not detected on D18/D5!");
     mpuPlantReady = false;
   } else {
     mpuPlantReady = true;
@@ -550,6 +553,7 @@ void saveHome() {
   prefs.putDouble("hlon", homeLon);
 }
 void clearTheft() {
+  possibleTheftActive = false;
   theftLatched = false;
   gpsShielded = false;
   homeLocationSet = false; homeSamples = 0; homeSumLat = 0; homeSumLon = 0;   // new GPS home will be learned
@@ -559,7 +563,7 @@ void clearTheft() {
   for (int i = 0; i < REPEAT_COUNT; i++) disturbTimes[i] = 0;
   prefs.putBool("latch", false);
   prefs.putBool("hset", false);
-  Serial.println(">>> [CLEARED] Theft latch, GPS shield and impact/repeat alerts reset. New GPS home will be learned.");
+  Serial.println(">>> [CLEARED] Theft latch, possible theft, GPS shield and impact/repeat alerts reset. New GPS home will be learned.");
 }
 void setTheftLatch() {
   if (!theftLatched) { theftLatched = true; prefs.putBool("latch", true); }
@@ -656,8 +660,8 @@ void checkSerialCommands(unsigned long nowMs) {
 // ============================================================================
 // Radio: rate limit, transmit, wait for ACK, retries, store-and-forward
 // ============================================================================
-bool txAllowed(int sev) {
-  if (sev >= 2) return true;                       // CRITICAL is never rate limited
+bool txAllowed(int sev, bool live) {
+  if (sev >= 2 || live) return true;               // CRITICAL & live GPS pursuit bypass rate limit
   unsigned long now = millis();
   int c = 0;
   for (int i = 0; i < MAX_TX_PER_MIN; i++) if (txTimes[i] != 0 && now - txTimes[i] < 60000) c++;
@@ -754,51 +758,118 @@ void sendReading(const char* tag, bool live = false, const char* statusOverride 
   unsigned long nowMs = millis();
   String status = statusOverride ? String(statusOverride) : confirmedState;
   int sev = severityOf(status);
-  if (!txAllowed(sev)) { Serial.println("[RATE LIMIT] non-critical packet skipped"); return; }
+  if (!txAllowed(sev, live)) { Serial.println("[RATE LIMIT] non-critical packet skipped"); return; }
 
-  bool tamperFlag = (status == "POACHING_RISK" || status == "NIGHT_POACHING_RISK" ||
-                     status == "CRITICAL_FALL" || status == "PLANT_STOLEN_MOVING" ||
-                     status == "TILT_ONLY" || status == "IMPACT_DETECTED" ||
-                     status == "REPEATED_DISTURBANCE" || status == "TAMPER_LID_OPENED" ||
-                     status == "GPS_SHIELDED_OR_JAMMED");
-  bool motionFlag = (status == "POACHING_RISK" || status == "NIGHT_POACHING_RISK" ||
-                     status == "WEATHER_STORM" || status == "PLANT_STOLEN_MOVING" ||
-                     status == "MOTION_ONLY" || status == "LOITERING" ||
-                     status == "REPEATED_DISTURBANCE");
   bool humanNow = (humanConfirmedAt != 0 && nowMs - humanConfirmedAt < HUMAN_HOLD_MS);
   unsigned long seq = ++seqCounter;
 
+  // Full data only for scheduled / clear / live GPS pursuit
+  bool fullData = (strcmp(tag, "SCHEDULED") == 0 || strcmp(tag, "STATUS_CLEAR") == 0 ||
+                   strcmp(tag, "LIVE_GPS_PURSUIT") == 0 || live);
+
   JsonDocument doc;
-  doc["n"]  = NODE_ID;              // node_identifier
-  doc["y"]  = "r";                  // packet type: reading
-  doc["q"]  = seq;                  // sequence number
-  doc["st"] = status;               // alert_status
-  doc["sv"] = sev;                  // severity 0 INFO / 1 WARNING / 2 CRITICAL
-  doc["tp"] = tamperFlag;           // tamper_detected
-  doc["mo"] = motionFlag;           // motion_detected
-  doc["md"] = motionDurationSec;    // motion_duration_seconds
-  doc["ti"] = round(currentTiltAngle * 10.0) / 10.0;   // node (box) tilt_angle
-  doc["pt"] = round(plantTiltAngle * 10.0) / 10.0;     // plant tilt_angle
-  doc["sm"] = soilMoisturePct;      // soil_moisture
-  doc["rn"] = effectiveIsRaining;   // is_raining
-  doc["hd"] = humanNow;             // human_detected (YOLO camera)
-  doc["hw"] = healthCode;           // health warning code
-  if (haveClimate && !isnan(currentTemp) && !isnan(currentHum)) {
-    doc["tc"] = round(currentTemp * 10.0) / 10.0;      // temperature
-    doc["hu"] = round(currentHum * 10.0) / 10.0;       // humidity
-  }
-  unsigned long ep = utcEpochNow(nowMs);
-  if (ep) doc["ts"] = ep;           // UTC timestamp (GPS)
-  if (gps.location.isValid() && gps.location.age() < 60000) {
-    doc["la"] = gps.location.lat();
-    doc["lo"] = gps.location.lng();
+  doc["n"]  = NODE_ID;
+  doc["y"]  = "r";
+  doc["q"]  = seq;
+  doc["st"] = status;
+  doc["sv"] = sev;
+
+  if (fullData) {
+    // ===== FULL SENSOR PACKET (every ~1 minute & live GPS tracking) =====
+    bool tamperFlag = (status == "POACHING_RISK" || status == "NIGHT_POACHING_RISK" ||
+                       status == "CRITICAL_FALL" || status == "PLANT_STOLEN_MOVING" ||
+                       status == "POSSIBLE_THEFT" || status == "TILT_ONLY" ||
+                       status == "IMPACT_DETECTED" || status == "REPEATED_DISTURBANCE" ||
+                       status == "GPS_SHIELDED_OR_JAMMED");
+    bool motionFlag = (status == "POACHING_RISK" || status == "NIGHT_POACHING_RISK" ||
+                       status == "WEATHER_STORM" || status == "PLANT_STOLEN_MOVING" ||
+                       status == "POSSIBLE_THEFT" || status == "MOTION_ONLY" ||
+                       status == "LOITERING" || status == "REPEATED_DISTURBANCE");
+    doc["tp"] = tamperFlag;
+    doc["mo"] = motionFlag;
+    doc["md"] = motionDurationSec;
+    doc["ti"] = round(currentTiltAngle * 10.0) / 10.0;
+    doc["pt"] = round(plantTiltAngle * 10.0) / 10.0;
+    doc["sm"] = soilMoisturePct;
+    doc["rn"] = effectiveIsRaining;
+    doc["hd"] = humanNow;
+    doc["hw"] = healthCode;
+    if (haveClimate && !isnan(currentTemp) && !isnan(currentHum)) {
+      doc["tc"] = round(currentTemp * 10.0) / 10.0;
+      doc["hu"] = round(currentHum * 10.0) / 10.0;
+    }
+    unsigned long ep = utcEpochNow(nowMs);
+    if (ep) doc["ts"] = ep;
+    if (gps.location.isValid() && gps.location.age() < 60000) {
+      doc["la"] = gps.location.lat();
+      doc["lo"] = gps.location.lng();
+    }
+  } else {
+    // ===== ALERT-ONLY PACKET (only sensors that matter for this alert) =====
+    doc["tp"] = true;
+
+    if (status == "CRITICAL_FALL" || status == "TILT_ONLY") {
+      doc["ti"] = round(currentTiltAngle * 10.0) / 10.0;
+      doc["pt"] = round(plantTiltAngle * 10.0) / 10.0;
+    }
+    else if (status == "MOTION_ONLY" || status == "LOITERING") {
+      doc["mo"] = true;
+      doc["md"] = motionDurationSec;
+    }
+    else if (status == "IMPACT_DETECTED") {
+      doc["mo"] = true;
+      doc["ti"] = round(currentTiltAngle * 10.0) / 10.0;
+      doc["pt"] = round(plantTiltAngle * 10.0) / 10.0;
+    }
+    else if (status == "REPEATED_DISTURBANCE") {
+      doc["mo"] = true;
+      doc["md"] = motionDurationSec;
+      doc["ti"] = round(currentTiltAngle * 10.0) / 10.0;
+    }
+    else if (status == "POACHING_RISK" || status == "NIGHT_POACHING_RISK") {
+      doc["mo"] = true;
+      doc["md"] = motionDurationSec;
+      doc["ti"] = round(currentTiltAngle * 10.0) / 10.0;
+      doc["pt"] = round(plantTiltAngle * 10.0) / 10.0;
+      doc["hd"] = humanNow;
+    }
+    else if (status == "WEATHER_STORM") {
+      doc["mo"] = true;
+      doc["ti"] = round(currentTiltAngle * 10.0) / 10.0;
+      doc["rn"] = effectiveIsRaining;
+      doc["sm"] = soilMoisturePct;
+    }
+    else if (status == "FIRE_OR_CANOPY_BREACH") {
+      if (haveClimate && !isnan(currentTemp) && !isnan(currentHum)) {
+        doc["tc"] = round(currentTemp * 10.0) / 10.0;
+        doc["hu"] = round(currentHum * 10.0) / 10.0;
+      }
+    }
+    else if (status == "POSSIBLE_THEFT" || status == "PLANT_STOLEN_MOVING" || status == "GPS_SHIELDED_OR_JAMMED") {
+      doc["mo"] = true;
+      doc["ti"] = round(currentTiltAngle * 10.0) / 10.0;
+      doc["pt"] = round(plantTiltAngle * 10.0) / 10.0;
+      if (gps.location.isValid() && gps.location.age() < 60000) {
+        doc["la"] = gps.location.lat();
+        doc["lo"] = gps.location.lng();
+      }
+    }
+    else if (status == "MAINTENANCE_MODE") {
+      // status + severity only
+    }
+    else {
+      doc["ti"] = round(currentTiltAngle * 10.0) / 10.0;
+      doc["mo"] = true;
+    }
+
+    unsigned long ep = utcEpochNow(nowMs);
+    if (ep) doc["ts"] = ep;
   }
 
   String body;
   serializeJson(doc, body);
-  // Must fit in one LoRa frame (signature adds 17 bytes). Drop the least important fields first.
-  const char* dropOrder[] = {"hu", "tc", "md", "ts"};
-  for (int i = 0; i < 4 && (int)body.length() + 17 > MAX_PLAINTEXT; i++) {
+  const char* dropOrder[] = {"hu", "tc", "md", "ts", "pt"};
+  for (int i = 0; i < 5 && (int)body.length() + 17 > MAX_PLAINTEXT; i++) {
     doc.remove(dropOrder[i]);
     body = ""; serializeJson(doc, body);
   }
@@ -821,11 +892,6 @@ void sendHealth(const char* tag) {
   doc["ak"] = ackPercent();
   doc["fw"] = FW_VERSION;
   if (selfTest.length()) { doc["ss"] = selfTest; selfTest = ""; }     // boot self-test, first packet only
-  if (BATTERY_MONITOR_ENABLED) {
-    doc["bt"] = round(batteryV * 100.0) / 100.0;
-    int pct = constrain((int)((batteryV - 3.3) / (4.2 - 3.3) * 100.0), 0, 100);
-    doc["bp"] = pct;
-  }
   String body; serializeJson(doc, body);
   sendSigned(body, seq, 1, tag, false);
   lastSentHealth = healthCode;
@@ -947,7 +1013,6 @@ void evaluateSensorFusion(unsigned long nowMs) {
     }
   }
   bool impactActive = impactBurst(nowMs);
-  if (impactActive && !prevImpactActive) requestCamera("IMPACT", nowMs);
   prevImpactActive = impactActive;
 
   // 1b. Plant Tilt + shock
@@ -988,7 +1053,6 @@ void evaluateSensorFusion(unsigned long nowMs) {
     if (plantImpactTimes[i] != 0 && nowMs - plantImpactTimes[i] <= IMPACT_WINDOW_MS) plantImpactCount++;
   }
   plantImpactActive = (plantImpactCount >= IMPACT_COUNT);
-  if (plantImpactActive && !prevPlantImpactActive) requestCamera("PLANT_SHOCK", nowMs);
   prevPlantImpactActive = plantImpactActive;
 
   // Node (box) tilt state
@@ -1031,31 +1095,25 @@ void evaluateSensorFusion(unsigned long nowMs) {
   }
   bool loitering = pirActive && ((unsigned long)motionDurationSec >= loiterSec);
 
-  // ===== CAMERA TRIGGER LOGIC =====
-  // ON  when: PIR = true AND (Node tilt OR Plant tilt OR shock) = true
-  // ON  when: Node (box) tilt rising edge
-  // OFF when: only Plant tilt + no rain + soil normal
-  // OFF when: pure PIR only
-  static bool prevPir = false, prevNodeTilt = false, prevPlantTilt = false;
-  bool anyNodePhysical  = isTilted || impactActive;
-  bool anyPlantPhysical = plantIsTilted || plantImpactActive;
-  bool anyPhysical      = anyNodePhysical || anyPlantPhysical;
-  bool soilNormal       = !soilStuckMax && (soilMoisturePct >= DROUGHT_SOIL_LIMIT || baselineSoilPct == -1);
+// ===== CAMERA TRIGGER LOGIC (PIR + Specific Physical Cause) =====
+  static bool prevPir = false, prevNodeTilt = false, prevPlantTilt = false, prevAnyPhysical = false;
+  bool anyPhysical = isTilted || plantIsTilted || impactActive || plantImpactActive;
 
   if (!maintenanceMode) {
-    if (pirActive && !prevPir && anyPhysical) {
-      requestCamera("PIR+PHYSICAL", nowMs);
+    if (pirActive && anyPhysical && (!prevPir || !prevAnyPhysical)) {
+      // Build exact cause string so Detector.py and Serial Monitor show which sensor triggered
+      String cause = "PIR";
+      if (isTilted)          cause += "+NODE_TILT";
+      if (plantIsTilted)     cause += "+PLANT_TILT";
+      if (impactActive)      cause += "+NODE_SHOCK";
+      if (plantImpactActive) cause += "+PLANT_SHOCK";
+
+      // Debug breakdown in Serial Monitor to catch which flag is stuck true at rest
+      Serial.printf("[CAM_DEBUG] nodeTilt=%d plantTilt=%d nodeShock=%d plantShock=%d\n",
+                    isTilted, plantIsTilted, impactActive, plantImpactActive);
+
+      requestCamera(cause.c_str(), nowMs);
     }
-    else if (isTilted && !prevNodeTilt) {
-      requestCamera("NODE_TILT", nowMs);
-    }
-    else if ((plantIsTilted && !prevPlantTilt) || (plantImpactActive && !prevPlantImpactActive)) {
-      // Plant movement alone only wakes camera if raining or soil abnormal
-      if (effectiveIsRaining || !soilNormal) {
-        requestCamera("PLANT_TILT", nowMs);
-      }
-    }
-    // pure PIR alone → camera stays OFF
 
     if (pirActive && !prevPir) registerDisturbance(nowMs);
     if ((isTilted && !prevNodeTilt) || (plantIsTilted && !prevPlantTilt)) registerDisturbance(nowMs);
@@ -1063,10 +1121,10 @@ void evaluateSensorFusion(unsigned long nowMs) {
   prevPir = pirActive;
   prevNodeTilt = isTilted;
   prevPlantTilt = plantIsTilted;
+  prevAnyPhysical = anyPhysical;
 
   bool repeated = repeatedDisturbance(nowMs);
-  // lastMovementMs is for GPS-shield detection of the NODE (box) only
-  if (isTilted || pirActive) lastMovementMs = nowMs;
+  if (isTilted || plantIsTilted || pirActive) lastMovementMs = nowMs;
 
   // 3. Rain sensor + wet-leaf obstruction filter
   rawRainWet = (digitalRead(RAIN_PIN) == LOW);
@@ -1092,9 +1150,8 @@ void evaluateSensorFusion(unsigned long nowMs) {
   if (soilMoisturePct >= 99 && !effectiveIsRaining) { if (soilHighStart == 0) soilHighStart = nowMs; } else soilHighStart = 0;
   waterlogged = (soilHighStart != 0 && nowMs - soilHighStart >= WATERLOG_MS);
 
-  // 5. Camera verdict + enclosure lid + GPS shield detection
+  // 5. Camera verdict + GPS shield detection
   bool humanSeen = (humanConfirmedAt != 0 && nowMs - humanConfirmedAt < HUMAN_HOLD_MS);
-  if (LID_SWITCH_ENABLED) lidOpen = (digitalRead(LID_PIN) == HIGH);
 
   bool fixLost = homeLocationSet && lastFixMs != 0 && (nowMs - lastFixMs > GPS_LOSS_CONFIRM_MS);
   bool movedAroundLoss = (lastMovementMs != 0) && (lastMovementMs + GPS_LOSS_LINK_MS >= lastFixMs) &&
@@ -1105,18 +1162,20 @@ void evaluateSensorFusion(unsigned long nowMs) {
     if (gpsShielded && nowMs - fixBackSince >= 60000) gpsShielded = false;
   } else fixBackSince = 0;
 
-  // 6. Latch theft (saved to flash)
-  // GPS is for the NODE (box) only. Plant accelerometer is NOT used for theft.
-  // Requires: GPS moved beyond geofence (3 confirms) + (box tilt OR PIR)
-  if (!maintenanceMode && homeLocationSet && awayCount >= AWAY_CONFIRM_COUNT &&
-      (isTilted || pirActive)) {
-    setTheftLatch();
-  }
-
-  // 7. Priority decision tree (now includes Plant tilt & shock)
+  // 6. Two-Tier Theft Detection:
+  //    Stage 1 (POSSIBLE_THEFT): GPS > 15 m (3 fixes) + (Box tilt OR Plant tilt)
+  //    Stage 2 (PLANT_STOLEN_MOVING - LATCHED): GPS > 15 m (3 fixes) + (Box/Plant tilt OR PIR) + Camera humanSeen
   bool anyTilt = isTilted || plantIsTilted;
   bool anyShock = impactActive || plantImpactActive;
 
+  possibleTheftActive = (!maintenanceMode && homeLocationSet && awayCount >= AWAY_CONFIRM_COUNT && anyTilt);
+
+  if (!maintenanceMode && homeLocationSet && awayCount >= AWAY_CONFIRM_COUNT &&
+      (anyTilt || pirActive) && humanSeen) {
+    setTheftLatch();
+  }
+
+  // 7. Priority decision tree
   String detectedState = "NORMAL";
   if (maintenanceMode) {
     detectedState = "MAINTENANCE_MODE";
@@ -1128,8 +1187,8 @@ void evaluateSensorFusion(unsigned long nowMs) {
     detectedState = "GPS_SHIELDED_OR_JAMMED";
   } else if (fireAnomalyActive) {
     detectedState = "FIRE_OR_CANOPY_BREACH";
-  } else if (lidOpen) {
-    detectedState = "TAMPER_LID_OPENED";
+  } else if (possibleTheftActive) {
+    detectedState = "POSSIBLE_THEFT";
   } else if (humanSeen) {
     detectedState = isNight ? "NIGHT_POACHING_RISK" : "POACHING_RISK";
   } else if (anyShock && !effectiveIsRaining) {
@@ -1165,14 +1224,18 @@ void evaluateSensorFusion(unsigned long nowMs) {
     }
     else if (confirmedState == "PLANT_STOLEN_MOVING") {
       setAlertLed(true);
-      Serial.printf(">>> [EMERGENCY: PLANT STOLEN - LATCHED] Moved %.1f m! Live 5s LoRa GPS tracking ACTIVE until CLEAR_THEFT.\n", distanceMovedMeters);
+      Serial.printf(">>> [EMERGENCY: PLANT STOLEN - LATCHED] Camera + GPS confirmed! Moved %.1f m! Live 5s LoRa GPS tracking ACTIVE until CLEAR_THEFT.\n", distanceMovedMeters);
       sendReading("EMERGENCY_STOLEN");
+    }
+    else if (confirmedState == "POSSIBLE_THEFT") {
+      setAlertLed(true);
+      Serial.printf(">>> [WARNING: POSSIBLE THEFT] GPS outside geofence (%.1f m) + Tilt detected! Live 5s LoRa GPS tracking ACTIVE.\n", distanceMovedMeters);
+      sendReading("ALERT_POSSIBLE_THEFT");
     }
     else if (confirmedState == "CRITICAL_FALL") {
       setAlertLed(true);
       Serial.printf(">>> [CRITICAL HARDWARE ALERT] Box tilted nearly 90 deg (%.1f deg)!\n", currentTiltAngle);
-      Serial.println("    ACTION NEEDED: Return box upright immediately, or bottom sensors (DHT11)");
-      Serial.println("    will be exposed to rain and soil/rain cables risk pulling tight or snapping!");
+      Serial.println("    ACTION NEEDED: Return box upright immediately, or sensors/cables risk damage!");
       sendReading("EMERGENCY_FALL");
     }
     else if (confirmedState == "GPS_SHIELDED_OR_JAMMED") {
@@ -1184,11 +1247,6 @@ void evaluateSensorFusion(unsigned long nowMs) {
       setAlertLed(true);
       Serial.println(">>> [ENVIRONMENTAL EMERGENCY] Rapid heat spike (+5C) & humidity drop (-15%) or extreme heat, confirmed twice!");
       sendReading("EMERGENCY_FIRE");
-    }
-    else if (confirmedState == "TAMPER_LID_OPENED") {
-      setAlertLed(true);
-      Serial.println(">>> [CRITICAL] Enclosure lid opened!");
-      sendReading("EMERGENCY_LID");
     }
     else if (confirmedState == "IMPACT_DETECTED") {
       setAlertLed(true);
@@ -1245,22 +1303,17 @@ void evaluateSensorFusion(unsigned long nowMs) {
 }
 
 // ============================================================================
-// Scheduled 30-second report: climate, two-step fire logic, health, daily, TX
+// Scheduled 1-minute report: climate, two-step fire logic, health, daily, TX
 // ============================================================================
 unsigned long currentTxInterval(unsigned long nowMs) {
-  // Normal sensor data → every 1 minute only
-  // Alerts are sent immediately on state change
-  // Stolen tracking uses 5-second live interval
   return NORMAL_TX_INTERVAL_MS;
 }
 
 void evaluateHealth(unsigned long nowMs) {
-  if (BATTERY_MONITOR_ENABLED) batteryV = (analogReadMilliVolts(BATTERY_PIN) / 1000.0) * BATTERY_DIVIDER_RATIO;
   if (dhtFailCount >= 3)                                   healthCode = "DHT";
-  else if (BATTERY_MONITOR_ENABLED && batteryV > 0.5 && batteryV < BATTERY_LOW_VOLT) healthCode = "BAT";
   else if (!mpuReady || mpuFault)                          healthCode = "MPU";
   else if (sensorsFrozen)                                  healthCode = "FRZ";
-  else if (rainSensorObstructed)                           healthCode = "RAIN";
+  else if (rainSensorObstructed)                           healthCode = "WET_LEAF";
   else if (fireAnomalyActive)                              healthCode = "FIRE";
   else if (haveClimate && currentTemp > HEAT_STRESS_LIMIT) healthCode = "HEAT";
   else if (soilStuckMax)                                   healthCode = "SOIL";
@@ -1287,7 +1340,7 @@ void readAndTransmitScheduled(unsigned long nowMs) {
     if (t == lastT && h == lastH) { if (thFrozenSince == 0) thFrozenSince = nowMs; }
     else { thFrozenSince = 0; lastT = t; lastH = h; }
 
-    // Fire logic #1: +5C and -15% versus 5 minutes ago, dry, confirmed on 2 reads in a row
+    // Fire logic #1: +5C and -15% versus 10 samples ago, dry, confirmed on 2 reads in a row
     if (hCount >= HIST_N) {
       float oldT = tHist[hIdx], oldH = hHist[hIdx];
       bool rate = (!effectiveIsRaining && (t - oldT) >= FIRE_TEMP_JUMP && (oldH - h) >= FIRE_HUM_DROP);
@@ -1301,11 +1354,11 @@ void readAndTransmitScheduled(unsigned long nowMs) {
   } else {
     dhtFailCount++;
     haveClimate = false;
-    Serial.println("[WARNING] DHT11 read failed on D4 (will omit temp/hum from LoRa packet)");
+    Serial.println("[WARNING] DHT11 read failed on D19 (will omit temp/hum from LoRa packet)");
   }
   if (effectiveIsRaining) dailyRainSec += ENV_TRANSMIT_INTERVAL / 1000;
 
-  // soil frozen check (same raw value every 30 s for 12 h, excluding the "maximum" case)
+  // soil frozen check (same raw value every 1 min for 12 h, excluding the "maximum" case)
   if (soilRaw == lastSoilSample && soilRaw < 4090) { if (soilFrozenSince == 0) soilFrozenSince = nowMs; }
   else { soilFrozenSince = 0; lastSoilSample = soilRaw; }
   sensorsFrozen = (thFrozenSince != 0 && nowMs - thFrozenSince >= FROZEN_MS) ||
@@ -1314,20 +1367,20 @@ void readAndTransmitScheduled(unsigned long nowMs) {
   evaluateHealth(nowMs);
 
   Serial.println("========================================");
-  Serial.printf("[30s SCHEDULED REPORT | %s MODE%s]\n", isNighttimeSarawak(nowMs) ? "NIGHT" : "DAY",
+  Serial.printf("[1min SCHEDULED REPORT | %s MODE%s]\n", isNighttimeSarawak(nowMs) ? "NIGHT" : "DAY",
                 (timeKnown ? "" : (storedSecValid ? ", time approx" : ", no time")));
-  Serial.printf("Temp: %.1f C | Hum: %.1f%% | Soil: %d%% | Rain: %s\n",
+  Serial.printf("Temperature: %.1f C | Humidity: %.1f%% | Soil Moisture: %d%% | Raining: %s\n",
                 currentTemp, currentHum, soilMoisturePct, effectiveIsRaining ? "YES" : "NO");
-  Serial.printf("Security: %s (sev %d) | NodeTilt: %.1f | PlantTilt: %.1f | Health: %s\n",
+  Serial.printf("Security State: %s (Severity %d) | Box Tilt: %.1f deg | Plant Tilt: %.1f deg\n",
                 confirmedState.c_str(), severityOf(confirmedState),
-                currentTiltAngle, plantTiltAngle, healthCode.c_str());
-  Serial.printf("GPS Fix: %s (Sats: %d | HDOP: %.1f | Drift: %.1f m | home %s) | Gateway ACK rate: %d%%\n",
+                currentTiltAngle, plantTiltAngle);
+  Serial.printf("System Health: %s (%s)\n", healthCode.c_str(), healthDescription(healthCode));
+  Serial.printf("GPS Fix: %s (Satellites: %d | HDOP: %.1f | Drift: %.1f m | Home: %s) | Gateway ACK Rate: %d%%\n",
                 gps.location.isValid() ? "YES" : "NO", gps.satellites.value(),
                 gps.hdop.isValid() ? gps.hdop.hdop() : 99.9, distanceMovedMeters,
-                homeLocationSet ? "set" : "learning", ackPercent());
+                homeLocationSet ? "SET" : "LEARNING", ackPercent());
   bool humanNow = (humanConfirmedAt != 0 && nowMs - humanConfirmedAt < HUMAN_HOLD_MS);
-  Serial.printf("Camera: human = %s\n", humanNow ? "YES" : "NO");
-  if (BATTERY_MONITOR_ENABLED) Serial.printf("Battery: %.2f V\n", batteryV);
+  Serial.printf("Camera Human Detected: %s\n", humanNow ? "YES" : "NO");
 
   if (nowMs - bootTime >= PIR_WARMUP_MS) {
     bool sentOk = false;
@@ -1343,12 +1396,6 @@ void readAndTransmitScheduled(unsigned long nowMs) {
     if (nowMs - lastDailySend >= DAILY_INTERVAL_MS) sendDaily();
     // link is up (we just got ACKs)? then forward one stored CRITICAL alert
     if (sentOk && ackPercent() > 0) flushOnePending(nowMs);
-
-    // last gasp: battery nearly dead
-    if (BATTERY_MONITOR_ENABLED && !lastGaspSent && batteryV > 0.5 && batteryV < BATTERY_CRITICAL_VOLT) {
-      lastGaspSent = true;
-      sendReading("LAST_GASP", false, "POWER_LOSS");
-    }
   }
   Serial.println("========================================");
 }
@@ -1363,7 +1410,6 @@ void setup() {
   pinMode(PIR_PIN, INPUT);
   pinMode(RAIN_PIN, INPUT);
   pinMode(LED_PIN, OUTPUT);
-  if (LID_SWITCH_ENABLED) pinMode(LID_PIN, INPUT_PULLUP);
   setAlertLed(false);
 
   Serial.println("\n****************************************");
@@ -1389,7 +1435,7 @@ void setup() {
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_SS);
   LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);
   if (!LoRa.begin(LORA_FREQ)) {
-    Serial.println("[ERROR] Starting LoRa Forest Node failed! Check SPI wiring (18,19,23,5,14,26).");
+    Serial.println("[ERROR] Starting LoRa Forest Node failed! Check SPI wiring (SCK=26, MISO=35, MOSI=25, SS=27, RST=22, DIO0=23).");
     while (1);
   }
   LoRa.setSyncWord(LORA_SYNC_WORD);
@@ -1421,13 +1467,14 @@ void loop() {
   // 1. Multi-sensor fusion & instant LoRa alerts on state change
   evaluateSensorFusion(nowMs);
 
-  // 2. Live 5-second GPS pursuit (while the plant is flagged stolen)
-  if (confirmedState == "PLANT_STOLEN_MOVING" && (nowMs - lastLiveTrackTime >= LIVE_TRACK_INTERVAL)) {
+  // 2. Live 5-second GPS pursuit (active for BOTH POSSIBLE_THEFT and PLANT_STOLEN_MOVING)
+  if ((confirmedState == "PLANT_STOLEN_MOVING" || confirmedState == "POSSIBLE_THEFT") &&
+      (nowMs - lastLiveTrackTime >= LIVE_TRACK_INTERVAL)) {
     lastLiveTrackTime = nowMs;
     sendReading("LIVE_GPS_PURSUIT", true);
   }
 
-  // 3. Scheduled 30-second environmental report & adaptive LoRa transmission
+  // 3. Scheduled 1-minute environmental report & adaptive LoRa transmission
   if (nowMs - lastEnvTransmitTime >= ENV_TRANSMIT_INTERVAL) {
     lastEnvTransmitTime = nowMs;
     readAndTransmitScheduled(nowMs);
@@ -1435,4 +1482,3 @@ void loop() {
 
   delay(50);
 }
-
